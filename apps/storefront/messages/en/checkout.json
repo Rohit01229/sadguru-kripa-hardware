@@ -1,0 +1,73 @@
+{
+  "title": "Checkout",
+  "empty": {
+    "title": "Your cart is empty",
+    "description": "Add some items before checking out.",
+    "browseCatalog": "Browse the catalog"
+  },
+  "signInRequired": {
+    "title": "Please sign in to continue",
+    "description": "You need an account to place an order. Your cart will be waiting."
+  },
+  "fulfilment": {
+    "title": "Fulfilment",
+    "delivery": {
+      "label": "Delivery",
+      "description": "Shipped to your saved address"
+    },
+    "pickup": {
+      "label": "Pickup at store",
+      "description": "Collect from the store counter"
+    }
+  },
+  "address": {
+    "title": "Delivery address",
+    "noneSaved": "No saved addresses.",
+    "addOne": "Add one",
+    "shipTo": "Ship to",
+    "selectPrompt": "Select a delivery address."
+  },
+  "gstin": {
+    "title": "GSTIN (optional, B2B)",
+    "label": "GSTIN",
+    "placeholder": "e.g. 19ABCDE1234F1Z5",
+    "hint": "Add your GSTIN to receive a B2B tax invoice."
+  },
+  "payment": {
+    "title": "Payment",
+    "online": {
+      "label": "Pay online (Razorpay)",
+      "description": "Secure card / UPI / netbanking"
+    },
+    "payLater": {
+      "label": "Pay at store / on delivery",
+      "description": "Settle when you collect or receive your order"
+    }
+  },
+  "summary": {
+    "title": "Order summary",
+    "itemTotal": "Item total",
+    "deliveryFee": "Delivery fee",
+    "free": "Free",
+    "grandTotal": "Grand total",
+    "grandTotalShort": "Grand total",
+    "total": "Total",
+    "calculating": "Calculating totals…",
+    "taxLine": "Tax: {taxKind} · place of supply {state}",
+    "taxIgst": "IGST (inter-state)",
+    "taxCgstSgst": "CGST+SGST (intra-state)"
+  },
+  "stock": {
+    "title": "Insufficient stock",
+    "reducePrompt": "Reduce these item(s) in your cart to continue:",
+    "available": "{qty} available"
+  },
+  "option": {
+    "selected": "Selected"
+  },
+  "placeOrder": "Place order",
+  "errors": {
+    "couldNotPlace": "Could not place the order.",
+    "network": "Network error — please retry."
+  }
+}

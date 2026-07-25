@@ -1,0 +1,50 @@
+{
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "add": "Add",
+    "edit": "Edit",
+    "delete": "Delete",
+    "remove": "Remove",
+    "search": "Search",
+    "apply": "Apply",
+    "clear": "Clear",
+    "reset": "Reset",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "close": "Close",
+    "confirm": "Confirm",
+    "submit": "Submit",
+    "continue": "Continue",
+    "retry": "Try again",
+    "loading": "Loading…",
+    "export": "Export",
+    "import": "Import",
+    "print": "Print"
+  },
+  "status": {
+    "empty": "Nothing here yet",
+    "error": "Something went wrong",
+    "noResults": "No results found"
+  },
+  "shell": {
+    "admin": "Admin",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "account": "Account",
+    "openNavigation": "Open navigation",
+    "menu": "Menu"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "catalog": "Catalog",
+    "stock": "Stock",
+    "billing": "Billing",
+    "ledger": "Ledger",
+    "orders": "Orders",
+    "reports": "Reports",
+    "settings": "Settings",
+    "audit": "Audit"
+  }
+}

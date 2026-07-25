@@ -1,0 +1,56 @@
+{
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "add": "Add",
+    "edit": "Edit",
+    "delete": "Delete",
+    "remove": "Remove",
+    "search": "Search",
+    "apply": "Apply",
+    "clear": "Clear",
+    "reset": "Reset",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "close": "Close",
+    "confirm": "Confirm",
+    "submit": "Submit",
+    "continue": "Continue",
+    "retry": "Try again",
+    "loading": "Loading…"
+  },
+  "status": {
+    "empty": "Nothing here yet",
+    "error": "Something went wrong",
+    "noResults": "No results found"
+  },
+  "shell": {
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "signInRegister": "Sign in / register",
+    "register": "Register",
+    "account": "Account",
+    "myAccount": "My account",
+    "welcome": "Welcome",
+    "accountMenu": "Account menu",
+    "cart": "Cart",
+    "catalog": "Catalog",
+    "orders": "Orders",
+    "myOrders": "My orders",
+    "search": "Search",
+    "searchCatalog": "Search catalog",
+    "openMenu": "Open menu",
+    "menu": "Menu"
+  },
+  "footer": {
+    "shop": "Shop",
+    "payment": "Payment",
+    "paymentNote": "Pay online or pay at store on pickup. Secure checkout for online orders.",
+    "billing": "Billing",
+    "billingNote": "Prices include GST. GST/HSN details are shown on each product and on your tax invoice.",
+    "blurb": "Paint, electrical, plumbing, tools and more — for trade and home.",
+    "rightsReserved": "All rights reserved.",
+    "pricesNote": "Prices and stock subject to change."
+  }
+}

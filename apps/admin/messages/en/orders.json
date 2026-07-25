@@ -1,0 +1,66 @@
+{
+  "title": "Order queue",
+  "description": "Online orders awaiting fulfilment — accept, pack, dispatch (generates the pakka invoice), then complete.",
+  "tabs": {
+    "filterAria": "Filter orders by status",
+    "all": "All"
+  },
+  "status": {
+    "PENDING_PAYMENT": "Awaiting payment",
+    "PAY_LATER": "Pay at store",
+    "CONFIRMED": "Confirmed",
+    "PACKED": "Packed",
+    "DISPATCHED": "Dispatched",
+    "COMPLETED": "Completed",
+    "CANCELLED": "Cancelled"
+  },
+  "payment": {
+    "UNPAID": "Unpaid",
+    "PARTIAL": "Partial",
+    "PAID": "Paid",
+    "REFUNDED": "Refunded"
+  },
+  "fulfilment": {
+    "delivery": "Delivery",
+    "pickup": "Pickup"
+  },
+  "dateFilter": {
+    "filterAria": "Filter orders by date",
+    "from": "From",
+    "to": "To",
+    "applying": "Applying…"
+  },
+  "table": {
+    "colOrder": "Order",
+    "colStatus": "Status",
+    "colFulfilment": "Fulfilment",
+    "colPayment": "Payment",
+    "colTotal": "Total",
+    "colInvoice": "Invoice",
+    "colAction": "Action"
+  },
+  "empty": {
+    "title": "No orders in this view",
+    "filtered": "No orders match this status / date filter. Try widening the range.",
+    "default": "New online orders will appear here as customers check out."
+  },
+  "actions": {
+    "accept": "Accept",
+    "pack": "Pack",
+    "dispatch": "Dispatch + invoice",
+    "complete": "Complete"
+  },
+  "toast": {
+    "dispatched": "Order dispatched",
+    "invoiceGenerated": "Invoice {invoiceNo} generated.",
+    "actionDone": "{label} — done"
+  },
+  "errors": {
+    "forbidden": "You do not have permission to fulfil orders.",
+    "invalidTransition": "That status change is not allowed from the order's current state.",
+    "alreadyDispatched": "This order is already dispatched.",
+    "cancelled": "This order is cancelled.",
+    "notFound": "Order not found.",
+    "generic": "Something went wrong. Please try again."
+  }
+}

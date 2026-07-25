@@ -1,0 +1,75 @@
+{
+  "heading": "कैटलॉग",
+  "description": "पेंट, बिजली का सामान, प्लंबिंग, औज़ार और बहुत कुछ — दुकानदारों और घर दोनों के लिए।",
+  "loadingCatalog": "कैटलॉग लोड हो रहा है",
+  "search": {
+    "label": "उत्पाद खोजें",
+    "placeholder": "उत्पाद खोजें…",
+    "submit": "खोजें",
+    "submitting": "खोज रहे हैं…"
+  },
+  "filters": {
+    "heading": "फ़िल्टर",
+    "category": "श्रेणी",
+    "allCategories": "सभी श्रेणियाँ",
+    "brand": "ब्रांड",
+    "allBrands": "सभी ब्रांड",
+    "price": "क़ीमत (₹)",
+    "priceHint": "उत्पाद की सूचीबद्ध इकाई क़ीमत के अनुसार",
+    "priceMin": "कम से कम",
+    "priceMax": "ज़्यादा से ज़्यादा",
+    "priceMinLabel": "रुपये में न्यूनतम क़ीमत",
+    "priceMaxLabel": "रुपये में अधिकतम क़ीमत",
+    "inStockOnly": "केवल स्टॉक में उपलब्ध",
+    "sortBy": "क्रम से लगाएँ",
+    "apply": "फ़िल्टर लागू करें",
+    "applying": "लागू कर रहे हैं…",
+    "clearAll": "सभी हटाएँ"
+  },
+  "sort": {
+    "relevance": "प्रासंगिकता",
+    "priceAsc": "क़ीमत: कम से ज़्यादा",
+    "priceDesc": "क़ीमत: ज़्यादा से कम",
+    "nameAsc": "नाम (A–Z)",
+    "newest": "सबसे नए"
+  },
+  "stock": {
+    "inStock": "स्टॉक में",
+    "outOfStock": "स्टॉक ख़त्म",
+    "inStockWithQty": "स्टॉक में · {qty}",
+    "currentlyOutOfStock": "फ़िलहाल स्टॉक में नहीं"
+  },
+  "empty": {
+    "filteredTitle": "आपके फ़िल्टर से मेल खाता कोई उत्पाद नहीं",
+    "filteredDescription": "क़ीमत की सीमा बढ़ाकर, कोई फ़िल्टर हटाकर, या कोई दूसरा शब्द खोजकर देखें।",
+    "title": "अभी कोई उत्पाद नहीं",
+    "description": "कैटलॉग में उत्पाद जोड़े जाने पर वे यहाँ दिखेंगे।",
+    "clearAllFilters": "सभी फ़िल्टर हटाएँ"
+  },
+  "pagination": {
+    "label": "पेज नेविगेशन",
+    "previous": "← पिछला",
+    "next": "अगला →"
+  },
+  "detail": {
+    "backToCatalog": "← कैटलॉग",
+    "sku": "SKU {sku}",
+    "availableIn": "इनमें उपलब्ध",
+    "wholeOnly": "केवल पूरी इकाई",
+    "taxNote": "GST {gst}% · HSN {hsn}. थोक छूट चेकआउट पर अपने-आप लागू हो जाती है।",
+    "loading": "उत्पाद लोड हो रहा है"
+  },
+  "cart": {
+    "unit": "इकाई",
+    "quantity": "मात्रा",
+    "decreaseQuantity": "मात्रा घटाएँ",
+    "increaseQuantity": "मात्रा बढ़ाएँ",
+    "addToCart": "कार्ट में जोड़ें",
+    "buyNow": "अभी ख़रीदें",
+    "wholePiecesNote": "यह इकाई पूरी संख्या में बेची जाती है।",
+    "outOfStockNote": "स्टॉक ख़त्म — कार्ट में नहीं जोड़ सकते।",
+    "errorQtyTooLow": "शून्य से ज़्यादा मात्रा दर्ज करें।",
+    "errorWholePieces": "यह इकाई पूरी संख्या में बेची जाती है।",
+    "added": "कार्ट में जोड़ा गया"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "page": {
+    "uninitTitle": "सेटिंग्स",
+    "uninitDescription": "स्टोर कॉन्फ़िग अभी सेट नहीं हुआ है। डिफ़ॉल्ट पंक्ति बनाने के लिए डेटाबेस सीड (<code>db:seed</code>) चलाएँ।",
+    "title": "दुकान सेटिंग्स",
+    "description": "ये हर नए बिल, ऑर्डर और प्रिंट को तय करती हैं (आपूर्ति-स्थान टैक्स के लिए होम स्टेट, बिल प्रीफ़िक्स, डिलीवरी शुल्क, रिज़र्वेशन TTL, GST राउंडिंग)।",
+    "readOnly": "केवल देखने के लिए — आपके पास <code>settings.write</code> नहीं है।",
+    "summaryShopName": "दुकान का नाम",
+    "summaryGstin": "GSTIN",
+    "summaryHomeState": "होम स्टेट",
+    "summaryInvoicePrefix": "बिल प्रीफ़िक्स",
+    "summaryGstRounding": "GST राउंडिंग",
+    "summaryReservationTtl": "रिज़र्वेशन TTL",
+    "minutesShort": "{minutes} मिनट"
+  },
+  "form": {
+    "identityLegend": "दुकान की पहचान",
+    "billingLegend": "बिलिंग और डिलीवरी",
+    "shopName": "दुकान का नाम",
+    "gstin": "GSTIN",
+    "gstinPlaceholder": "19ABCDE1234F1Z5",
+    "homeState": "होम स्टेट कोड",
+    "homeStatePlaceholder": "19",
+    "logoKey": "लोगो (R2 ऑब्जेक्ट की)",
+    "logoKeyPlaceholder": "logos/shop.png",
+    "address": "पता",
+    "bankDetails": "बैंक विवरण (बिल पर छपता है)",
+    "invoiceTerms": "बिल के नियम व शर्तें",
+    "invoicePrefixFormat": "बिल प्रीफ़िक्स फ़ॉर्मेट",
+    "invoicePrefixPlaceholder": "{FY}/{SEQ6}",
+    "gstRounding": "GST राउंडिंग",
+    "deliveryFlatFee": "डिलीवरी फ़्लैट शुल्क (₹)",
+    "freeDeliveryThreshold": "मुफ़्त-डिलीवरी सीमा (₹, खाली=कोई नहीं)",
+    "reservationTtlMinutes": "रिज़र्वेशन TTL (मिनट)",
+    "save": "सेटिंग्स सहेजें",
+    "toastSaved": "सेटिंग्स सहेजी गईं"
+  },
+  "errors": {
+    "forbidden": "सेटिंग्स बदलने की आपको अनुमति नहीं है।",
+    "notInitialised": "स्टोर कॉन्फ़िग सेट नहीं है — सीड चलाएँ।",
+    "invalidInput": "अमान्य इनपुट।",
+    "generic": "कुछ गड़बड़ हुई। कृपया दोबारा कोशिश करें।"
+  }
+}

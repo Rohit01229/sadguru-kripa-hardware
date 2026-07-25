@@ -1,0 +1,29 @@
+{
+  "title": "ऑडिट लॉग",
+  "description": "हर संवेदनशील कार्रवाई का सिर्फ़-जोड़ने वाला रिकॉर्ड — किसने, कब, क्या बदला। केवल पढ़ने के लिए; कभी संपादित या मिटाया नहीं जाता।",
+  "filter": {
+    "action": "कार्रवाई",
+    "actionPlaceholder": "bill.pakka.create",
+    "targetType": "लक्ष्य प्रकार",
+    "targetTypePlaceholder": "Invoice",
+    "from": "से",
+    "to": "तक",
+    "submit": "फ़िल्टर करें",
+    "submitting": "फ़िल्टर हो रहा है…"
+  },
+  "table": {
+    "when": "कब",
+    "action": "कार्रवाई",
+    "actor": "करने वाला",
+    "target": "लक्ष्य",
+    "details": "विवरण"
+  },
+  "actorSystem": "सिस्टम",
+  "empty": {
+    "title": "कोई ऑडिट प्रविष्टि मेल नहीं खाती",
+    "descriptionFiltered": "कार्रवाई, लक्ष्य या तारीख़ के फ़िल्टर हटाकर देखें।",
+    "description": "संवेदनशील कार्रवाइयाँ होते ही यहाँ दिखेंगी।",
+    "clearFilters": "फ़िल्टर हटाएँ"
+  },
+  "nextPage": "अगला पेज →"
+}

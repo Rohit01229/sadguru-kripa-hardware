@@ -1,0 +1,73 @@
+{
+  "title": "चेकआउट",
+  "empty": {
+    "title": "आपका कार्ट खाली है",
+    "description": "चेकआउट से पहले कुछ सामान जोड़ें।",
+    "browseCatalog": "कैटलॉग देखें"
+  },
+  "signInRequired": {
+    "title": "जारी रखने के लिए साइन इन करें",
+    "description": "ऑर्डर देने के लिए खाता ज़रूरी है। आपका कार्ट सुरक्षित रहेगा।"
+  },
+  "fulfilment": {
+    "title": "सामान कैसे लें",
+    "delivery": {
+      "label": "डिलीवरी",
+      "description": "आपके सहेजे पते पर भेजा जाएगा"
+    },
+    "pickup": {
+      "label": "दुकान से पिकअप",
+      "description": "दुकान के काउंटर से ले जाएँ"
+    }
+  },
+  "address": {
+    "title": "डिलीवरी का पता",
+    "noneSaved": "कोई सहेजा पता नहीं।",
+    "addOne": "पता जोड़ें",
+    "shipTo": "इस पते पर भेजें",
+    "selectPrompt": "डिलीवरी का पता चुनें।"
+  },
+  "gstin": {
+    "title": "GSTIN (वैकल्पिक, B2B)",
+    "label": "GSTIN",
+    "placeholder": "जैसे 19ABCDE1234F1Z5",
+    "hint": "B2B टैक्स इनवॉइस पाने के लिए अपना GSTIN दर्ज करें।"
+  },
+  "payment": {
+    "title": "भुगतान",
+    "online": {
+      "label": "ऑनलाइन भुगतान (Razorpay)",
+      "description": "सुरक्षित कार्ड / UPI / नेटबैंकिंग"
+    },
+    "payLater": {
+      "label": "दुकान पर / डिलीवरी पर भुगतान",
+      "description": "सामान लेते या पाते समय भुगतान करें"
+    }
+  },
+  "summary": {
+    "title": "ऑर्डर का सारांश",
+    "itemTotal": "सामान का कुल",
+    "deliveryFee": "डिलीवरी शुल्क",
+    "free": "मुफ़्त",
+    "grandTotal": "कुल योग",
+    "grandTotalShort": "कुल योग",
+    "total": "कुल",
+    "calculating": "कुल जोड़ा जा रहा है…",
+    "taxLine": "टैक्स: {taxKind} · आपूर्ति स्थान {state}",
+    "taxIgst": "IGST (अंतर-राज्यीय)",
+    "taxCgstSgst": "CGST+SGST (राज्य के भीतर)"
+  },
+  "stock": {
+    "title": "स्टॉक पर्याप्त नहीं",
+    "reducePrompt": "जारी रखने के लिए कार्ट में इन सामानों की मात्रा घटाएँ:",
+    "available": "{qty} उपलब्ध"
+  },
+  "option": {
+    "selected": "चुना गया"
+  },
+  "placeOrder": "ऑर्डर दें",
+  "errors": {
+    "couldNotPlace": "ऑर्डर नहीं दिया जा सका।",
+    "network": "नेटवर्क त्रुटि — कृपया फिर से प्रयास करें।"
+  }
+}

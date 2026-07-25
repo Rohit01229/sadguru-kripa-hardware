@@ -1,0 +1,38 @@
+{
+  "description": "Today's counter activity, low stock, and receivables at a glance.",
+  "newInvoice": "New invoice",
+  "rollupUnavailable": {
+    "title": "Roll-up unavailable",
+    "description": "The sales / dues roll-up needs the <code>reports.read</code> permission. Use the sidebar to open the sections you can access."
+  },
+  "stats": {
+    "todaysInvoices": "Today's invoices",
+    "todaysInvoicesSub": "Pakka, today",
+    "todaysSales": "Today's sales",
+    "lowStockItems": "Low-stock items",
+    "lowStockItemsSub": "At or below reorder level",
+    "receivables": "Receivables",
+    "customers": "{count, plural, one {# customer} other {# customers}}"
+  },
+  "topItems": {
+    "title": "Top items (30 days)",
+    "salesReport": "Sales report",
+    "emptyTitle": "No sales yet",
+    "emptyDescription": "Top-selling items over the last 30 days will appear here once you start billing.",
+    "colItem": "Item",
+    "colQty": "Qty",
+    "colSales": "Sales"
+  },
+  "lowStock": {
+    "title": "Low stock",
+    "viewAll": "View all",
+    "emptyTitle": "Stock looks healthy",
+    "emptyDescription": "Everything is above its reorder level.",
+    "colItem": "Item",
+    "colStatus": "Status",
+    "colOnHand": "On hand",
+    "colReorder": "Reorder",
+    "statusOutOfStock": "Out of stock",
+    "statusLow": "Low"
+  }
+}

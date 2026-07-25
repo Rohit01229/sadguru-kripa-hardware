@@ -1,0 +1,92 @@
+{
+  "nav": {
+    "sections": "Ledger sections",
+    "directory": "Khata directory"
+  },
+  "directory": {
+    "title": "Khata — receivables",
+    "description": "Counter customers and what they owe. Click a customer for the statement, aging and to record a payment.",
+    "colCustomer": "Customer",
+    "colPhone": "Phone",
+    "colGstin": "GSTIN",
+    "col0to30": "0–30",
+    "col31to60": "31–60",
+    "col60plus": "60+",
+    "colOutstanding": "Outstanding",
+    "statement": "Statement →",
+    "emptyFilteredTitle": "No customers match this filter",
+    "emptyFilteredDescription": "Try clearing the search, aging bucket or outstanding filter.",
+    "emptyTitle": "No customers yet",
+    "emptyDescriptionWritable": "Add a counter customer above to start tracking khata receivables.",
+    "emptyDescriptionReadonly": "Counter customers will appear here once they are added."
+  },
+  "agingBuckets": {
+    "current": "0–30 days",
+    "b31to60": "31–60 days",
+    "b60plus": "60+ days"
+  },
+  "filter": {
+    "ariaLabel": "Filter khata directory",
+    "search": "Search",
+    "searchPlaceholder": "Name / phone / GSTIN…",
+    "agingBucket": "Aging bucket",
+    "anyAge": "Any age",
+    "hasOutstandingOnly": "Has outstanding only",
+    "apply": "Apply",
+    "applying": "Applying…"
+  },
+  "customerForm": {
+    "name": "Name",
+    "namePlaceholder": "Customer name",
+    "phone": "Phone",
+    "phonePlaceholder": "Phone",
+    "gstin": "GSTIN",
+    "gstinPlaceholder": "GSTIN",
+    "type": "Type",
+    "typeRetail": "Retail",
+    "typeWholesale": "Wholesale",
+    "addCustomer": "Add customer",
+    "toastAdded": "Customer added"
+  },
+  "statement": {
+    "breadcrumb": "Ledger",
+    "noPhone": "no phone",
+    "noGstin": "no GSTIN",
+    "card0to30": "0–30 days",
+    "card31to60": "31–60 days",
+    "card60plus": "60+ days",
+    "cardOutstanding": "Outstanding",
+    "heading": "Statement",
+    "emptyTitle": "No ledger entries yet",
+    "emptyDescription": "Invoices, payments and adjustments for this customer will appear here.",
+    "colDate": "Date",
+    "colType": "Type",
+    "colReference": "Reference",
+    "colAmount": "Amount",
+    "colBalance": "Balance",
+    "typeInvoice": "Invoice",
+    "typePayment": "Payment",
+    "typeCreditNote": "Credit note / cancel",
+    "typeOpening": "Opening balance",
+    "typeAdjustment": "Adjustment"
+  },
+  "payment": {
+    "amount": "Amount (₹)",
+    "amountPlaceholder": "0.00",
+    "mode": "Mode",
+    "modeCash": "Cash",
+    "modeUpi": "UPI",
+    "modeCard": "Card",
+    "reference": "Reference",
+    "referencePlaceholder": "txn ref (optional)",
+    "recordPayment": "Record payment",
+    "toastRecorded": "Payment recorded",
+    "toastRecordedDescription": "Outstanding now {amount}."
+  },
+  "reminder": {
+    "send": "Send dues reminder",
+    "toastQueued": "Reminder queued",
+    "toastQueuedDescription": "Sends when jobs are live in S7.",
+    "toastNothing": "Nothing outstanding — no reminder sent."
+  }
+}

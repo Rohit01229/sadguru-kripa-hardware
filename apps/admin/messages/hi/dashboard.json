@@ -1,0 +1,38 @@
+{
+  "description": "आज की काउंटर गतिविधि, कम स्टॉक और बकाया एक नज़र में।",
+  "newInvoice": "नया बिल",
+  "rollupUnavailable": {
+    "title": "रोल-अप उपलब्ध नहीं",
+    "description": "बिक्री / बकाया रोल-अप के लिए <code>reports.read</code> अनुमति चाहिए। जिन सेक्शन तक आपकी पहुँच है, उन्हें खोलने के लिए साइडबार का इस्तेमाल करें।"
+  },
+  "stats": {
+    "todaysInvoices": "आज के बिल",
+    "todaysInvoicesSub": "पक्का, आज",
+    "todaysSales": "आज की बिक्री",
+    "lowStockItems": "कम स्टॉक वाले आइटम",
+    "lowStockItemsSub": "रीऑर्डर स्तर पर या उससे नीचे",
+    "receivables": "बकाया",
+    "customers": "{count, plural, one {# ग्राहक} other {# ग्राहक}}"
+  },
+  "topItems": {
+    "title": "टॉप आइटम (30 दिन)",
+    "salesReport": "बिक्री रिपोर्ट",
+    "emptyTitle": "अभी तक कोई बिक्री नहीं",
+    "emptyDescription": "पिछले 30 दिनों में सबसे ज़्यादा बिकने वाले आइटम यहाँ दिखेंगे, जैसे ही आप बिलिंग शुरू करेंगे।",
+    "colItem": "आइटम",
+    "colQty": "मात्रा",
+    "colSales": "बिक्री"
+  },
+  "lowStock": {
+    "title": "कम स्टॉक",
+    "viewAll": "सभी देखें",
+    "emptyTitle": "स्टॉक ठीक-ठाक है",
+    "emptyDescription": "हर चीज़ अपने रीऑर्डर स्तर से ऊपर है।",
+    "colItem": "आइटम",
+    "colStatus": "स्थिति",
+    "colOnHand": "मौजूद",
+    "colReorder": "रीऑर्डर",
+    "statusOutOfStock": "स्टॉक ख़त्म",
+    "statusLow": "कम"
+  }
+}

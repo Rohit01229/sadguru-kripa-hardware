@@ -1,0 +1,29 @@
+{
+  "title": "Audit log",
+  "description": "Append-only record of every sensitive action — who, when, what changed. Read-only; never edited or deleted.",
+  "filter": {
+    "action": "Action",
+    "actionPlaceholder": "bill.pakka.create",
+    "targetType": "Target type",
+    "targetTypePlaceholder": "Invoice",
+    "from": "From",
+    "to": "To",
+    "submit": "Filter",
+    "submitting": "Filtering…"
+  },
+  "table": {
+    "when": "When",
+    "action": "Action",
+    "actor": "Actor",
+    "target": "Target",
+    "details": "Details"
+  },
+  "actorSystem": "system",
+  "empty": {
+    "title": "No audit entries match",
+    "descriptionFiltered": "Try clearing the action, target, or date filters.",
+    "description": "Sensitive actions will appear here as they happen.",
+    "clearFilters": "Clear filters"
+  },
+  "nextPage": "Next page →"
+}

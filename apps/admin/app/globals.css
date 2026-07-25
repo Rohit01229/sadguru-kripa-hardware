@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Warm hardware-store palette: kraft-paper grounds, espresso/walnut ink, burnt-
+   amber/aged-brass primary, warm stone neutrals, brick-red destructive. Tuned to
+   feel like the trade (timber, brass, paint, steel) — not a generated theme. */
+@layer base {
+  :root {
+    --background: 40 30% 96%;
+    --foreground: 22 20% 16%;
+    --card: 40 33% 98.5%;
+    --card-foreground: 22 20% 16%;
+    --popover: 40 33% 98.5%;
+    --popover-foreground: 22 20% 16%;
+    --primary: 26 80% 44%;
+    --primary-foreground: 40 40% 98%;
+    --secondary: 34 25% 90%;
+    --secondary-foreground: 24 24% 22%;
+    --muted: 36 22% 91%;
+    --muted-foreground: 26 12% 40%;
+    --accent: 32 38% 86%;
+    --accent-foreground: 24 30% 22%;
+    --destructive: 8 70% 47%;
+    --destructive-foreground: 40 40% 98%;
+    --success: 122 38% 33%;
+    --success-foreground: 40 40% 98%;
+    --warning: 38 88% 45%;
+    --warning-foreground: 24 40% 12%;
+    --info: 209 58% 42%;
+    --info-foreground: 40 40% 98%;
+    --border: 32 20% 84%;
+    --input: 32 20% 84%;
+    --ring: 26 80% 44%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 24 16% 9%;
+    --foreground: 38 26% 90%;
+    --card: 24 16% 11%;
+    --card-foreground: 38 26% 90%;
+    --popover: 24 16% 11%;
+    --popover-foreground: 38 26% 90%;
+    --primary: 30 84% 54%;
+    --primary-foreground: 24 30% 12%;
+    --secondary: 24 12% 18%;
+    --secondary-foreground: 38 26% 90%;
+    --muted: 24 12% 18%;
+    --muted-foreground: 34 14% 64%;
+    --accent: 24 14% 20%;
+    --accent-foreground: 38 26% 90%;
+    --destructive: 8 64% 49%;
+    --destructive-foreground: 40 40% 98%;
+    --success: 122 33% 45%;
+    --success-foreground: 24 30% 10%;
+    --warning: 38 84% 52%;
+    --warning-foreground: 24 40% 10%;
+    --info: 209 62% 58%;
+    --info-foreground: 24 30% 10%;
+    --border: 24 12% 20%;
+    --input: 24 12% 20%;
+    --ring: 30 84% 54%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  .input {
+    @apply rounded-md border border-input bg-background px-3 py-1.5 text-sm
+      shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+}
+
+/* On-demand receipt printing (S4): when a print receipt is on the page, print ONLY
+   the receipt (thermal/A4/A5). The template marks itself with [data-print-receipt]. */
+@media print {
+  body:has([data-print-receipt]) * {
+    visibility: hidden;
+  }
+  body:has([data-print-receipt]) [data-print-receipt],
+  body:has([data-print-receipt]) [data-print-receipt] * {
+    visibility: visible;
+  }
+  [data-print-receipt] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: none !important;
+  }
+}

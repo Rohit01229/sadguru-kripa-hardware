@@ -1,0 +1,58 @@
+{
+  "title": "मेरे ऑर्डर",
+  "loadingOrders": "ऑर्डर लोड हो रहे हैं",
+  "loadingOrder": "ऑर्डर लोड हो रहा है",
+  "filters": {
+    "statusLabel": "स्थिति",
+    "fromLabel": "से",
+    "toLabel": "तक",
+    "applying": "लागू हो रहा है…",
+    "statusAll": "सभी स्थितियाँ",
+    "statusPendingPayment": "भुगतान बाकी",
+    "statusPayLater": "दुकान पर भुगतान",
+    "statusConfirmed": "पुष्ट",
+    "statusPacked": "पैक किया गया",
+    "statusDispatched": "भेज दिया गया",
+    "statusCompleted": "पूरा हुआ",
+    "statusCancelled": "रद्द किया गया"
+  },
+  "empty": {
+    "filteredTitle": "इन फ़िल्टर से कोई ऑर्डर मेल नहीं खाता",
+    "filteredDescription": "कोई दूसरी स्थिति या तारीख़ सीमा आज़माएँ, या फ़िल्टर हटा दें।",
+    "title": "अभी कोई ऑर्डर नहीं",
+    "description": "जब आप ऑर्डर देंगे, वह यहाँ दिखेगा ताकि आप उसे ट्रैक कर सकें।",
+    "clearFilters": "फ़िल्टर हटाएँ",
+    "browseCatalog": "कैटलॉग देखें"
+  },
+  "list": {
+    "itemCount": "{count, plural, one {# सामान} other {# सामान}}"
+  },
+  "detail": {
+    "backToOrders": "मेरे ऑर्डर",
+    "placedMeta": "{date} को दिया गया · {fulfilment} · {payment}",
+    "step": {
+      "placed": "दिया गया",
+      "confirmed": "पुष्ट",
+      "packed": "पैक किया गया",
+      "dispatched": "भेज दिया गया",
+      "completed": "पूरा हुआ"
+    },
+    "reservationNotice": "स्टॉक {date} तक आरक्षित है — पुष्टि के लिए भुगतान पूरा करें।",
+    "itemTotal": "सामान का कुल",
+    "deliveryFee": "डिलीवरी शुल्क",
+    "free": "मुफ़्त",
+    "grandTotal": "कुल योग",
+    "invoiceNotice": "टैक्स इनवॉइस बन गया:"
+  },
+  "actions": {
+    "reorder": "फिर से ऑर्डर करें",
+    "cancelOrder": "ऑर्डर रद्द करें",
+    "confirmTitle": "यह ऑर्डर रद्द करें?",
+    "confirmDescription": "आरक्षित स्टॉक रिलीज़ हो जाएगा। इसे वापस नहीं किया जा सकता।",
+    "keepOrder": "ऑर्डर रखें",
+    "couldNotCancel": "रद्द नहीं किया जा सका।",
+    "cancelledToastTitle": "ऑर्डर रद्द किया गया",
+    "cancelledToastDescription": "आरक्षित स्टॉक रिलीज़ कर दिया गया है।",
+    "reorderedToast": "सामान आपके कार्ट में जोड़ा गया"
+  }
+}

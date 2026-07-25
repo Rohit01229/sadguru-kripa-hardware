@@ -1,0 +1,15 @@
+{
+  "title": "आपका कार्ट",
+  "emptyTitle": "आपका कार्ट खाली है",
+  "emptyDescription": "कैटलॉग देखें और शुरू करने के लिए सामान जोड़ें।",
+  "browseCatalog": "कैटलॉग देखें",
+  "unitPriceEach": "{unitLabel} · {price} प्रति नग",
+  "quantityLabel": "{name} के लिए मात्रा",
+  "decreaseQuantity": "{name} की मात्रा घटाएँ",
+  "increaseQuantity": "{name} की मात्रा बढ़ाएँ",
+  "removeLabel": "{name} हटाएँ",
+  "itemTotalIndicative": "सामान का कुल (टैक्स से पहले, अनुमानित)",
+  "itemTotal": "सामान का कुल",
+  "proceedToCheckout": "चेकआउट पर आगे बढ़ें",
+  "checkout": "चेकआउट"
+}

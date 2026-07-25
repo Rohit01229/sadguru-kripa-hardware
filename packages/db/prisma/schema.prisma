@@ -1,0 +1,629 @@
+// Hardware Store — Prisma schema (FULL model).
+// Source of truth: docs/architecture/13-data-architecture.md.
+// Foundation subset (auth realms + RBAC + audit + UoM core + counters + StoreConfig)
+// grown to the full 13 model in slice S0: PriceSlab, Batch, Reservation,
+// Supplier/GoodsReceipt/GrnLine/SupplierPayment, Address, LedgerEntry,
+// Invoice/InvoiceLine/Payment, CreditNoteCounter/CreditNote/CreditNoteLine,
+// Order/OrderLine, ProcessedWebhook.
+
+generator client {
+  provider        = "prisma-client-js"
+  // relationJoins: lets reads pass `relationLoadStrategy: "join"` so a Product +
+  // brand/baseUnit/saleUnits/stock projection resolves in ONE SQL JOIN instead of
+  // fanning out into N sequential Neon round-trips (perf — catalog/getProduct).
+  // GA-promoted strategy still gated behind this preview flag at client-generation
+  // time in Prisma 6.x. NOTE: requires `prisma generate` to take effect; until the
+  // client is regenerated, core falls back to the default (multi-query) strategy
+  // automatically (see packages/core/src/shared/db.ts joinStrategy()), so the
+  // running app is unaffected by adding this flag.
+  previewFeatures = ["postgresqlExtensions", "relationJoins"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [pg_trgm]
+}
+
+// ───────────────────────── Enums ─────────────────────────
+enum UnitKind {
+  MEASURED // length / weight / volume → decimals allowed
+  PIECE //    whole numbers only
+}
+
+enum CustomerType {
+  RETAIL
+  WHOLESALE
+}
+
+enum MovementKind {
+  GRN_IN
+  SALE_OUT
+  KACHA_OUT
+  ADJUST_IN
+  ADJUST_OUT
+  SALES_RETURN_IN
+  PURCHASE_RETURN_OUT
+  ORDER_DISPATCH_OUT
+}
+
+enum ReservationStatus {
+  ACTIVE
+  RELEASED
+  CONVERTED
+  EXPIRED
+}
+
+enum LedgerEntryType {
+  INVOICE_DEBIT
+  PAYMENT_CREDIT
+  CREDIT_NOTE_CREDIT
+  OPENING
+  ADJUSTMENT
+}
+
+enum InvoiceStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  CREDIT
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAY_LATER
+  CONFIRMED
+  PACKED
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+enum FulfilmentType {
+  DELIVERY
+  PICKUP
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+// ──────────────────── Auth realm: STAFF ────────────────────
+model StaffUser {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  name          String
+  status        String         @default("ACTIVE") // ACTIVE | DISABLED
+  emailVerified DateTime?
+  roles         UserRole[]
+  sessions      StaffSession[]
+  totp          StaffTotp?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model StaffSession {
+  id          String    @id @default(cuid())
+  staffUserId String
+  staffUser   StaffUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([staffUserId])
+}
+
+model StaffTotp {
+  staffUserId   String    @id
+  staffUser     StaffUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+  secretEnc     String // encrypted at rest
+  recoveryCodes String[] // hashed
+  enabled       Boolean   @default(false) // scaffolded, off in v1
+}
+
+// ──────────────────── Auth realm: CUSTOMER ────────────────────
+model Customer {
+  id          String           @id @default(cuid())
+  name        String
+  phone       String?
+  gstin       String?
+  type        CustomerType     @default(RETAIL)
+  creditLimit Decimal?         @db.Decimal(14, 2)
+  account     CustomerAccount?
+  addresses   Address[]
+  invoices    Invoice[]
+  orders      Order[]
+  ledger      LedgerEntry[]
+  createdAt   DateTime         @default(now())
+
+  @@index([phone])
+}
+
+model CustomerAccount {
+  id            String            @id @default(cuid())
+  customerId    String            @unique
+  customer      Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  email         String            @unique
+  passwordHash  String
+  emailVerified DateTime?
+  sessions      CustomerSession[]
+  createdAt     DateTime          @default(now())
+}
+
+model CustomerSession {
+  id        String          @id @default(cuid())
+  accountId String
+  account   CustomerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime        @default(now())
+
+  @@index([accountId])
+}
+
+model VerificationToken {
+  id        String    @id @default(cuid())
+  realm     String // STAFF | CUSTOMER
+  subjectId String
+  purpose   String // EMAIL_VERIFY | PASSWORD_RESET
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([subjectId, purpose])
+}
+
+// ──────────────────────── RBAC ────────────────────────
+model Permission {
+  id    String           @id @default(cuid())
+  key   String           @unique // e.g. "bill.pakka.create"
+  roles RolePermission[]
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  key         String           @unique // OWNER | (future) CASHIER ...
+  label       String
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  staffUserId String
+  roleId      String
+  staffUser   StaffUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([staffUserId, roleId])
+}
+
+// ──────────────────────── Audit ────────────────────────
+model AuditLog {
+  id             String   @id @default(cuid())
+  actorStaffId   String?
+  roleAtTime     String?
+  permissionUsed String?
+  action         String
+  targetType     String?
+  targetId       String?
+  before         Json?
+  after          Json?
+  requestId      String?
+  createdAt      DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+}
+
+// ──────────────────── Catalog & Unit-of-Measure ────────────────────
+model Category {
+  id       String     @id @default(cuid())
+  name     String
+  parentId String?
+  parent   Category?  @relation("Sub", fields: [parentId], references: [id])
+  children Category[] @relation("Sub")
+  products Product[]
+}
+
+model Brand {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  products Product[]
+
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "Brand_name_trgm_idx", type: Gin)
+}
+
+model Unit {
+  id           String            @id @default(cuid())
+  code         String            @unique // "m","coil","L","bucket","pc","box","kg","bag"
+  name         String
+  kind         UnitKind
+  baseProducts Product[]         @relation("BaseUnit")
+  saleUnits    ProductSaleUnit[]
+}
+
+model Product {
+  id              String            @id @default(cuid())
+  sku             String            @unique
+  name            String
+  brandId         String?
+  brand           Brand?            @relation(fields: [brandId], references: [id])
+  categoryId      String
+  category        Category          @relation(fields: [categoryId], references: [id])
+  hsnCode         String?
+  baseUnitId      String
+  baseUnit        Unit              @relation("BaseUnit", fields: [baseUnitId], references: [id])
+  costPerBaseUnit Decimal           @db.Decimal(14, 2)
+  gstRate         Decimal           @db.Decimal(5, 2)
+  priceInclusive  Boolean           @default(false)
+  imageKeys       String[]
+  reorderLevel    Decimal?          @db.Decimal(14, 3)
+  trackExpiry     Boolean           @default(false)
+  allowNegative   Boolean           @default(false)
+  availableOnline Boolean           @default(true)
+  isActive        Boolean           @default(true)
+  saleUnits       ProductSaleUnit[]
+  batches         Batch[]
+  stock           ProductStock?
+  movements       StockMovement[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([categoryId])
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "Product_name_trgm_idx", type: Gin)
+  @@index([sku(ops: raw("gin_trgm_ops"))], map: "Product_sku_trgm_idx", type: Gin)
+}
+
+model ProductSaleUnit {
+  id           String      @id @default(cuid())
+  productId    String
+  product      Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitId       String
+  unit         Unit        @relation(fields: [unitId], references: [id])
+  factorToBase Decimal     @db.Decimal(18, 6) // baseQty = saleQty × factorToBase
+  mrp          Decimal?    @db.Decimal(14, 2)
+  salePrice    Decimal     @db.Decimal(14, 2)
+  isDefault    Boolean     @default(false)
+  priceSlabs   PriceSlab[]
+
+  @@unique([productId, unitId])
+}
+
+model ProductStock {
+  productId String   @id
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  onHand    Decimal  @default(0) @db.Decimal(14, 3) // base units
+  reserved  Decimal  @default(0) @db.Decimal(14, 3)
+  updatedAt DateTime @updatedAt
+}
+
+model StockMovement {
+  id           String       @id @default(cuid())
+  productId    String
+  product      Product      @relation(fields: [productId], references: [id])
+  batchId      String? // FK added with Batch model later
+  baseQty      Decimal      @db.Decimal(14, 3) // signed: + in, − out
+  kind         MovementKind
+  refType      String? // INVOICE | GRN | ORDER | ADJUSTMENT | CN
+  refId        String?
+  reason       String?
+  actorStaffId String?
+  createdAt    DateTime     @default(now())
+
+  @@index([productId, createdAt])
+  @@index([kind])
+}
+
+// ──────────────────── Counters & settings ────────────────────
+model InvoiceCounter {
+  fy     String @id // "2026-27"
+  lastNo Int    @default(0)
+}
+
+model CreditNoteCounter {
+  fy     String @id // "2026-27" — own gapless series (13 §8)
+  lastNo Int    @default(0)
+}
+
+model StoreConfig {
+  id                    String   @id @default("default")
+  name                  String
+  gstin                 String?
+  homeState             String // intra/inter-state decision (03 §8)
+  address               String?
+  logoKey               String?
+  bankDetails           String?
+  invoiceTerms          String?
+  invoicePrefixFormat   String   @default("{FY}/{SEQ6}")
+  deliveryFlatFee       Decimal  @default(0) @db.Decimal(14, 2)
+  freeDeliveryThreshold Decimal? @db.Decimal(14, 2)
+  reservationTtlMinutes Int      @default(30)
+  gstRoundingMode       String   @default("PER_INVOICE")
+}
+
+// ──────────────────── Pricing & batches (13 §4) ────────────────────
+model PriceSlab {
+  // quantity-break (bulk) pricing on a sale unit
+  id               String          @id @default(cuid())
+  saleUnitId       String
+  saleUnit         ProductSaleUnit @relation(fields: [saleUnitId], references: [id], onDelete: Cascade)
+  minQty           Decimal         @db.Decimal(14, 3)
+  pricePerSaleUnit Decimal         @db.Decimal(14, 2)
+
+  @@index([saleUnitId, minQty])
+}
+
+model Batch {
+  // batch + optional expiry / MRP-wise on-hand for FIFO/expiry
+  id         String    @id @default(cuid())
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  code       String
+  mrp        Decimal?  @db.Decimal(14, 2)
+  mfgDate    DateTime?
+  expiryDate DateTime?
+  onHand     Decimal   @default(0) @db.Decimal(14, 3) // base units
+
+  @@unique([productId, code])
+  @@index([expiryDate])
+}
+
+// ──────────────────── Reservations (13 §5) ────────────────────
+model Reservation {
+  id        String            @id @default(cuid())
+  orderId   String
+  order     Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  baseQty   Decimal           @db.Decimal(14, 3)
+  status    ReservationStatus @default(ACTIVE)
+  expiresAt DateTime
+  createdAt DateTime          @default(now())
+
+  @@index([status, expiresAt])
+  @@index([productId])
+}
+
+// ──────────────────── Suppliers & purchasing (13 §6) ────────────────────
+model Supplier {
+  id        String            @id @default(cuid())
+  name      String
+  gstin     String?
+  phone     String?
+  address   String?
+  receipts  GoodsReceipt[]
+  payments  SupplierPayment[]
+  createdAt DateTime          @default(now())
+}
+
+model GoodsReceipt {
+  // GRN
+  id          String    @id @default(cuid())
+  supplierId  String?
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
+  refNo       String?
+  date        DateTime  @default(now())
+  note        String?
+  lines       GrnLine[]
+  createdById String?
+}
+
+model GrnLine {
+  id              String       @id @default(cuid())
+  grnId           String
+  grn             GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  productId       String
+  batchId         String?
+  baseQty         Decimal      @db.Decimal(14, 3)
+  costPerBaseUnit Decimal      @db.Decimal(14, 2)
+}
+
+model SupplierPayment {
+  // payables [N]
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  amount     Decimal  @db.Decimal(14, 2)
+  mode       String
+  date       DateTime @default(now())
+}
+
+// ──────────────────── Parties: addresses & khata ledger (13 §7) ────────────────────
+model Address {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  line1      String
+  line2      String?
+  city       String
+  state      String // place-of-supply driver (03 §8)
+  pincode    String
+  isDefault  Boolean  @default(false)
+}
+
+model LedgerEntry {
+  id         String          @id @default(cuid())
+  customerId String
+  customer   Customer        @relation(fields: [customerId], references: [id])
+  type       LedgerEntryType
+  amount     Decimal         @db.Decimal(14, 2) // + debit / − credit by convention
+  refType    String? // INVOICE | PAYMENT | CN
+  refId      String?
+  note       String?
+  createdAt  DateTime        @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+// ──────────────────── Billing & GST (13 §8) ────────────────────
+model Invoice {
+  id                 String        @id @default(cuid())
+  fy                 String // "2026-27"
+  invoiceNo          String // "2026-27/000124"
+  customerId         String?
+  customer           Customer?     @relation(fields: [customerId], references: [id])
+  customerNameSnap   String? // walk-in / snapshot
+  customerGstinSnap  String?
+  placeOfSupplyState String
+  date               DateTime      @default(now())
+  taxableTotal       Decimal       @db.Decimal(14, 2)
+  discountTotal      Decimal       @default(0) @db.Decimal(14, 2)
+  cgstTotal          Decimal       @default(0) @db.Decimal(14, 2)
+  sgstTotal          Decimal       @default(0) @db.Decimal(14, 2)
+  igstTotal          Decimal       @default(0) @db.Decimal(14, 2)
+  roundOff           Decimal       @default(0) @db.Decimal(14, 2)
+  grandTotal         Decimal       @db.Decimal(14, 2)
+  status             InvoiceStatus @default(ACTIVE)
+  cancelledReason    String?
+  orderId            String?       @unique // set when generated from an order on dispatch
+  createdById        String?
+  lines              InvoiceLine[]
+  payments           Payment[]
+  creditNotes        CreditNote[]
+  createdAt          DateTime      @default(now())
+
+  @@unique([fy, invoiceNo]) // gapless backstop (03 §7)
+  @@index([customerId])
+}
+
+model InvoiceLine {
+  id           String  @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId    String
+  saleUnitId   String
+  hsnCode      String?
+  saleQty      Decimal @db.Decimal(14, 3)
+  baseQty      Decimal @db.Decimal(14, 3)
+  unitPrice    Decimal @db.Decimal(14, 2) // may be a manual rate override
+  lineDiscount Decimal @default(0) @db.Decimal(14, 2)
+  taxableValue Decimal @db.Decimal(14, 2) // after discount, before tax (03 §8)
+  gstRate      Decimal @db.Decimal(5, 2)
+  cgst         Decimal @default(0) @db.Decimal(14, 2)
+  sgst         Decimal @default(0) @db.Decimal(14, 2)
+  igst         Decimal @default(0) @db.Decimal(14, 2)
+}
+
+model Payment {
+  id         String      @id @default(cuid())
+  invoiceId  String?
+  invoice    Invoice?    @relation(fields: [invoiceId], references: [id])
+  orderId    String?
+  customerId String?
+  mode       PaymentMode
+  amount     Decimal     @db.Decimal(14, 2) // part-payment supported (many per invoice)
+  reference  String? // UPI/txn ref / Razorpay paymentId
+  date       DateTime    @default(now())
+
+  @@index([invoiceId])
+}
+
+model CreditNote {
+  id           String           @id @default(cuid())
+  fy           String
+  creditNoteNo String // own gapless series
+  invoiceId    String
+  invoice      Invoice          @relation(fields: [invoiceId], references: [id])
+  reason       String?
+  taxableTotal Decimal          @db.Decimal(14, 2)
+  cgstTotal    Decimal          @default(0) @db.Decimal(14, 2)
+  sgstTotal    Decimal          @default(0) @db.Decimal(14, 2)
+  igstTotal    Decimal          @default(0) @db.Decimal(14, 2)
+  grandTotal   Decimal          @db.Decimal(14, 2)
+  refundMode   String? // CASH | UPI | KHATA_ADJUST | GATEWAY
+  lines        CreditNoteLine[]
+  createdAt    DateTime         @default(now())
+
+  @@unique([fy, creditNoteNo])
+}
+
+model CreditNoteLine {
+  id           String     @id @default(cuid())
+  creditNoteId String
+  creditNote   CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  productId    String
+  saleUnitId   String
+  saleQty      Decimal    @db.Decimal(14, 3)
+  baseQty      Decimal    @db.Decimal(14, 3)
+  taxableValue Decimal    @db.Decimal(14, 2)
+  gstRate      Decimal    @db.Decimal(5, 2)
+}
+
+// ──────────────────── Orders & ecommerce (13 §9) ────────────────────
+model Order {
+  id                 String         @id @default(cuid())
+  orderNo            String         @unique
+  customerId         String
+  customer           Customer       @relation(fields: [customerId], references: [id])
+  status             OrderStatus    @default(PENDING_PAYMENT)
+  fulfilment         FulfilmentType
+  addressId          String?
+  placeOfSupplyState String?
+  itemTotal          Decimal        @db.Decimal(14, 2)
+  deliveryFee        Decimal        @default(0) @db.Decimal(14, 2)
+  grandTotal         Decimal        @db.Decimal(14, 2)
+  paymentStatus      PaymentStatus  @default(UNPAID)
+  razorpayOrderId    String?
+  reservations       Reservation[]
+  lines              OrderLine[]
+  createdAt          DateTime       @default(now())
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model OrderLine {
+  id         String  @id @default(cuid())
+  orderId    String
+  order      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  String
+  saleUnitId String
+  saleQty    Decimal @db.Decimal(14, 3)
+  baseQty    Decimal @db.Decimal(14, 3)
+  unitPrice  Decimal @db.Decimal(14, 2)
+}
+
+model ProcessedWebhook {
+  // idempotency (03 §9)
+  id        String   @id @default(cuid())
+  eventId   String   @unique // Razorpay event id
+  paymentId String?
+  type      String?
+  createdAt DateTime @default(now())
+}
+
+// ──────────────────── Idempotency (04 §5) ────────────────────
+// (key, principal, route, requestHash) → stored response, so a retried
+// stock-/money-moving create returns the original result instead of repeating the
+// effect. Same key + different body → IDEMPOTENCY_MISMATCH (409). First needed by
+// GRN in S3 (stock-moving); reused by pakka/convert/place-order/payment/CN.
+model IdempotencyKey {
+  id          String   @id @default(cuid())
+  key         String
+  principalId String // staff or customer id that issued the key
+  route       String // logical route, e.g. "POST /api/grn"
+  requestHash String // hash of the validated request body
+  response    Json // the stored success response (replayed verbatim)
+  statusCode  Int      @default(201)
+  createdAt   DateTime @default(now())
+
+  @@unique([key, principalId, route])
+  @@index([createdAt])
+}

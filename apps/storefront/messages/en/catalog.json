@@ -1,0 +1,75 @@
+{
+  "heading": "Catalog",
+  "description": "Paint, electrical, plumbing, tools and more — for trade and home.",
+  "loadingCatalog": "Loading catalog",
+  "search": {
+    "label": "Search products",
+    "placeholder": "Search products…",
+    "submit": "Search",
+    "submitting": "Searching…"
+  },
+  "filters": {
+    "heading": "Filters",
+    "category": "Category",
+    "allCategories": "All categories",
+    "brand": "Brand",
+    "allBrands": "All brands",
+    "price": "Price (₹)",
+    "priceHint": "Per the product's listed unit price",
+    "priceMin": "Min",
+    "priceMax": "Max",
+    "priceMinLabel": "Minimum price in rupees",
+    "priceMaxLabel": "Maximum price in rupees",
+    "inStockOnly": "In stock only",
+    "sortBy": "Sort by",
+    "apply": "Apply filters",
+    "applying": "Applying…",
+    "clearAll": "Clear all"
+  },
+  "sort": {
+    "relevance": "Relevance",
+    "priceAsc": "Price: low to high",
+    "priceDesc": "Price: high to low",
+    "nameAsc": "Name (A–Z)",
+    "newest": "Newest"
+  },
+  "stock": {
+    "inStock": "In stock",
+    "outOfStock": "Out of stock",
+    "inStockWithQty": "In stock · {qty}",
+    "currentlyOutOfStock": "Currently out of stock"
+  },
+  "empty": {
+    "filteredTitle": "No products match your filters",
+    "filteredDescription": "Try widening your price range, clearing a filter, or searching a different term.",
+    "title": "No products yet",
+    "description": "Products will appear here once they are added to the catalog.",
+    "clearAllFilters": "Clear all filters"
+  },
+  "pagination": {
+    "label": "Pagination",
+    "previous": "← Previous",
+    "next": "Next →"
+  },
+  "detail": {
+    "backToCatalog": "← Catalog",
+    "sku": "SKU {sku}",
+    "availableIn": "Available in",
+    "wholeOnly": "whole only",
+    "taxNote": "GST {gst}% · HSN {hsn}. Bulk discounts apply automatically at checkout.",
+    "loading": "Loading product"
+  },
+  "cart": {
+    "unit": "Unit",
+    "quantity": "Quantity",
+    "decreaseQuantity": "Decrease quantity",
+    "increaseQuantity": "Increase quantity",
+    "addToCart": "Add to cart",
+    "buyNow": "Buy now",
+    "wholePiecesNote": "This unit is sold in whole pieces.",
+    "outOfStockNote": "Out of stock — cannot add to cart.",
+    "errorQtyTooLow": "Enter a quantity greater than zero.",
+    "errorWholePieces": "This unit is sold in whole pieces.",
+    "added": "Added to cart"
+  }
+}

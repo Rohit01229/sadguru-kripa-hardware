@@ -1,0 +1,44 @@
+{
+  "page": {
+    "uninitTitle": "Settings",
+    "uninitDescription": "Store config is not initialised. Run the database seed (<code>db:seed</code>) to create the default row.",
+    "title": "Store settings",
+    "description": "These drive every new invoice, order and print (home state for place-of-supply tax, invoice prefix, delivery fees, reservation TTL, GST rounding).",
+    "readOnly": "Read-only — you lack <code>settings.write</code>.",
+    "summaryShopName": "Shop name",
+    "summaryGstin": "GSTIN",
+    "summaryHomeState": "Home state",
+    "summaryInvoicePrefix": "Invoice prefix",
+    "summaryGstRounding": "GST rounding",
+    "summaryReservationTtl": "Reservation TTL",
+    "minutesShort": "{minutes} min"
+  },
+  "form": {
+    "identityLegend": "Shop identity",
+    "billingLegend": "Billing & delivery",
+    "shopName": "Shop name",
+    "gstin": "GSTIN",
+    "gstinPlaceholder": "19ABCDE1234F1Z5",
+    "homeState": "Home state code",
+    "homeStatePlaceholder": "19",
+    "logoKey": "Logo (R2 object key)",
+    "logoKeyPlaceholder": "logos/shop.png",
+    "address": "Address",
+    "bankDetails": "Bank details (printed on invoice)",
+    "invoiceTerms": "Invoice terms & conditions",
+    "invoicePrefixFormat": "Invoice prefix format",
+    "invoicePrefixPlaceholder": "{FY}/{SEQ6}",
+    "gstRounding": "GST rounding",
+    "deliveryFlatFee": "Delivery flat fee (₹)",
+    "freeDeliveryThreshold": "Free-delivery threshold (₹, blank=none)",
+    "reservationTtlMinutes": "Reservation TTL (minutes)",
+    "save": "Save settings",
+    "toastSaved": "Settings saved"
+  },
+  "errors": {
+    "forbidden": "You do not have permission to change settings.",
+    "notInitialised": "Store config not initialised — run the seed.",
+    "invalidInput": "Invalid input.",
+    "generic": "Something went wrong. Please try again."
+  }
+}

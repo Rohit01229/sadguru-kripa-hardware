@@ -1,0 +1,26 @@
+{
+  "name": "@hardware/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint": "./eslint.base.mjs",
+    "./eslint-boundaries": "./eslint.boundaries.mjs",
+    "./prettier": "./prettier.config.mjs",
+    "./tailwind": "./tailwind.preset.ts",
+    "./tsconfig.base.json": "./tsconfig.base.json"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.16.0"
+  }
+}

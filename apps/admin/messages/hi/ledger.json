@@ -1,0 +1,92 @@
+{
+  "nav": {
+    "sections": "खाता अनुभाग",
+    "directory": "खाता बही"
+  },
+  "directory": {
+    "title": "खाता — बकाया",
+    "description": "काउंटर ग्राहक और उन पर कितना बकाया है। स्टेटमेंट, एजिंग और भुगतान दर्ज करने के लिए किसी ग्राहक पर क्लिक करें।",
+    "colCustomer": "ग्राहक",
+    "colPhone": "फ़ोन",
+    "colGstin": "GSTIN",
+    "col0to30": "0–30",
+    "col31to60": "31–60",
+    "col60plus": "60+",
+    "colOutstanding": "बकाया",
+    "statement": "स्टेटमेंट →",
+    "emptyFilteredTitle": "इस फ़िल्टर से कोई ग्राहक मेल नहीं खाता",
+    "emptyFilteredDescription": "खोज, एजिंग वर्ग या बकाया फ़िल्टर हटाकर देखें।",
+    "emptyTitle": "अभी कोई ग्राहक नहीं",
+    "emptyDescriptionWritable": "खाता बकाया का हिसाब रखने के लिए ऊपर एक काउंटर ग्राहक जोड़ें।",
+    "emptyDescriptionReadonly": "ग्राहक जोड़े जाने पर काउंटर ग्राहक यहाँ दिखेंगे।"
+  },
+  "agingBuckets": {
+    "current": "0–30 दिन",
+    "b31to60": "31–60 दिन",
+    "b60plus": "60+ दिन"
+  },
+  "filter": {
+    "ariaLabel": "खाता बही फ़िल्टर करें",
+    "search": "खोजें",
+    "searchPlaceholder": "नाम / फ़ोन / GSTIN…",
+    "agingBucket": "एजिंग वर्ग",
+    "anyAge": "कोई भी अवधि",
+    "hasOutstandingOnly": "केवल बकाया वाले",
+    "apply": "लागू करें",
+    "applying": "लागू हो रहा है…"
+  },
+  "customerForm": {
+    "name": "नाम",
+    "namePlaceholder": "ग्राहक का नाम",
+    "phone": "फ़ोन",
+    "phonePlaceholder": "फ़ोन",
+    "gstin": "GSTIN",
+    "gstinPlaceholder": "GSTIN",
+    "type": "प्रकार",
+    "typeRetail": "खुदरा",
+    "typeWholesale": "थोक",
+    "addCustomer": "ग्राहक जोड़ें",
+    "toastAdded": "ग्राहक जोड़ा गया"
+  },
+  "statement": {
+    "breadcrumb": "बही-खाता",
+    "noPhone": "फ़ोन नहीं",
+    "noGstin": "GSTIN नहीं",
+    "card0to30": "0–30 दिन",
+    "card31to60": "31–60 दिन",
+    "card60plus": "60+ दिन",
+    "cardOutstanding": "बकाया",
+    "heading": "स्टेटमेंट",
+    "emptyTitle": "अभी कोई खाता प्रविष्टि नहीं",
+    "emptyDescription": "इस ग्राहक के बिल, भुगतान और समायोजन यहाँ दिखेंगे।",
+    "colDate": "तारीख़",
+    "colType": "प्रकार",
+    "colReference": "संदर्भ",
+    "colAmount": "रकम",
+    "colBalance": "शेष",
+    "typeInvoice": "बिल",
+    "typePayment": "भुगतान",
+    "typeCreditNote": "क्रेडिट नोट / रद्द",
+    "typeOpening": "शुरुआती शेष",
+    "typeAdjustment": "समायोजन"
+  },
+  "payment": {
+    "amount": "रकम (₹)",
+    "amountPlaceholder": "0.00",
+    "mode": "तरीका",
+    "modeCash": "नकद",
+    "modeUpi": "UPI",
+    "modeCard": "कार्ड",
+    "reference": "संदर्भ",
+    "referencePlaceholder": "लेन-देन संदर्भ (वैकल्पिक)",
+    "recordPayment": "भुगतान दर्ज करें",
+    "toastRecorded": "भुगतान दर्ज हुआ",
+    "toastRecordedDescription": "अब बकाया {amount}।"
+  },
+  "reminder": {
+    "send": "बकाया अनुस्मारक भेजें",
+    "toastQueued": "अनुस्मारक क़तार में",
+    "toastQueuedDescription": "S7 में जॉब चालू होने पर भेजा जाएगा।",
+    "toastNothing": "कुछ बकाया नहीं — कोई अनुस्मारक नहीं भेजा गया।"
+  }
+}

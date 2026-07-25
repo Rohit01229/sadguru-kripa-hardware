@@ -1,0 +1,15 @@
+{
+  "title": "Your cart",
+  "emptyTitle": "Your cart is empty",
+  "emptyDescription": "Browse the catalog and add items to get started.",
+  "browseCatalog": "Browse the catalog",
+  "unitPriceEach": "{unitLabel} · {price} each",
+  "quantityLabel": "Quantity for {name}",
+  "decreaseQuantity": "Decrease quantity for {name}",
+  "increaseQuantity": "Increase quantity for {name}",
+  "removeLabel": "Remove {name}",
+  "itemTotalIndicative": "Item total (pre-tax, indicative)",
+  "itemTotal": "Item total",
+  "proceedToCheckout": "Proceed to checkout",
+  "checkout": "Checkout"
+}

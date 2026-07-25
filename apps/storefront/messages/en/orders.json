@@ -1,0 +1,58 @@
+{
+  "title": "My orders",
+  "loadingOrders": "Loading orders",
+  "loadingOrder": "Loading order",
+  "filters": {
+    "statusLabel": "Status",
+    "fromLabel": "From",
+    "toLabel": "To",
+    "applying": "Applying…",
+    "statusAll": "All statuses",
+    "statusPendingPayment": "Awaiting payment",
+    "statusPayLater": "Pay at store",
+    "statusConfirmed": "Confirmed",
+    "statusPacked": "Packed",
+    "statusDispatched": "Dispatched",
+    "statusCompleted": "Completed",
+    "statusCancelled": "Cancelled"
+  },
+  "empty": {
+    "filteredTitle": "No orders match these filters",
+    "filteredDescription": "Try a different status or date range, or clear the filters.",
+    "title": "No orders yet",
+    "description": "When you place an order, it will show up here so you can track it.",
+    "clearFilters": "Clear filters",
+    "browseCatalog": "Browse the catalog"
+  },
+  "list": {
+    "itemCount": "{count, plural, one {# item} other {# items}}"
+  },
+  "detail": {
+    "backToOrders": "My orders",
+    "placedMeta": "Placed {date} · {fulfilment} · {payment}",
+    "step": {
+      "placed": "Placed",
+      "confirmed": "Confirmed",
+      "packed": "Packed",
+      "dispatched": "Dispatched",
+      "completed": "Completed"
+    },
+    "reservationNotice": "Stock reserved until {date} — complete payment to confirm.",
+    "itemTotal": "Item total",
+    "deliveryFee": "Delivery fee",
+    "free": "Free",
+    "grandTotal": "Grand total",
+    "invoiceNotice": "Tax invoice generated:"
+  },
+  "actions": {
+    "reorder": "Reorder",
+    "cancelOrder": "Cancel order",
+    "confirmTitle": "Cancel this order?",
+    "confirmDescription": "Reserved stock will be released. This cannot be undone.",
+    "keepOrder": "Keep order",
+    "couldNotCancel": "Could not cancel.",
+    "cancelledToastTitle": "Order cancelled",
+    "cancelledToastDescription": "Reserved stock has been released.",
+    "reorderedToast": "Items added to your cart"
+  }
+}
