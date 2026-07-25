@@ -22,5 +22,10 @@ export function middleware(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/((?!api/healthz|api/readyz|_next/static|_next/image|favicon.ico).*)"],
+  // Exclude health checks, Next internals, and the public PWA assets (manifest, service
+  // worker, icons, offline page) so they are reachable without a staff session — the
+  // login page must be installable and the SW must register while signed out.
+  matcher: [
+    "/((?!api/healthz|api/readyz|_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icons/|offline.html).*)",
+  ],
 };

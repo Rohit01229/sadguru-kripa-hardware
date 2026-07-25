@@ -1,10 +1,11 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { getStoreConfig } from "@hardware/core";
 import { Toaster } from "@hardware/ui";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
+import { PwaRegister } from "./PwaRegister";
 
 // Tab title tracks the configurable shop name (Settings → Shop name) instead of a
 // hardcoded string, so renaming the store updates the browser tab everywhere. Falls
@@ -20,8 +21,23 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { default: `${name} — Admin`, template: `%s · ${name}` },
     description: "Stock, billing and ledger for the shop.",
+    // PWA: makes the admin console installable (manifest + icons + iOS home-screen meta).
+    manifest: "/manifest.webmanifest",
+    applicationName: "SK Admin",
+    appleWebApp: { capable: true, statusBarStyle: "default", title: "SK Admin" },
+    icons: {
+      icon: [
+        { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+        { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      ],
+      apple: "/icons/apple-touch-icon.png",
+    },
   };
 }
+
+export const viewport: Viewport = {
+  themeColor: "#2f2018",
+};
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // Active UI locale (from the NEXT_LOCALE cookie, via the next-intl request config) +
@@ -37,6 +53,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <NextIntlClientProvider locale={locale} messages={messages}>
           {children}
           <Toaster />
+          <PwaRegister />
         </NextIntlClientProvider>
       </body>
     </html>

@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { Toaster } from "@hardware/ui";
+import { PwaRegister } from "./PwaRegister";
 import { cache } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
@@ -30,8 +31,23 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: await resolveStoreName(),
     description: "Paint, electrical, plumbing, tools and more.",
+    // PWA: makes the storefront installable (manifest + icons + iOS home-screen meta).
+    manifest: "/manifest.webmanifest",
+    applicationName: "Sadguru Kripa Hardware",
+    appleWebApp: { capable: true, statusBarStyle: "default", title: "Sadguru" },
+    icons: {
+      icon: [
+        { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+        { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      ],
+      apple: "/icons/apple-touch-icon.png",
+    },
   };
 }
+
+export const viewport: Viewport = {
+  themeColor: "#b05d1b",
+};
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // Resolve the customer session here so the Header can show an account menu with
@@ -60,6 +76,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <Footer storeName={storeName} />
             </div>
             <Toaster />
+            <PwaRegister />
           </CartProvider>
         </NextIntlClientProvider>
       </body>
