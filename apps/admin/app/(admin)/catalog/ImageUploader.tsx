@@ -100,7 +100,6 @@ export function ImageUploader({
             >
               {/* Plain <img> (not next/image) so no remote-domain allowlist is needed;
                   cldThumb serves a right-sized, auto-format derivative. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={cldThumb(url)}
                 alt={`Product image ${i + 1}`}

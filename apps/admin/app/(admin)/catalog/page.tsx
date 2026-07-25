@@ -344,7 +344,6 @@ function Thumb({ url, size = 40 }: { url?: string; size?: number }) {
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={cldThumb(url)}
       alt=""
