@@ -8,6 +8,12 @@
 
 generator client {
   provider        = "prisma-client-js"
+  // Vercel's serverless Node runtime is rhel-openssl-3.0.x. Generate that engine in
+  // addition to `native` (the local/CI build platform) so the deployed function has a
+  // matching Query Engine binary — otherwise Prisma throws "could not locate the Query
+  // Engine for runtime rhel-openssl-3.0.x" at runtime. Pairs with the next.config
+  // outputFileTracing* settings that copy the .so into the serverless bundle.
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
   // relationJoins: lets reads pass `relationLoadStrategy: "join"` so a Product +
   // brand/baseUnit/saleUnits/stock projection resolves in ONE SQL JOIN instead of
   // fanning out into N sequential Neon round-trips (perf — catalog/getProduct).

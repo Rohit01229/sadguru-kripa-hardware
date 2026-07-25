@@ -1,3 +1,4 @@
+import path from "path";
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
@@ -34,6 +35,14 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@hardware/core", "@hardware/auth", "@hardware/ui"],
+  // Prisma on Vercel + pnpm monorepo: Next's file tracer misses the dynamically-loaded
+  // query-engine .so, so the deployed function throws "could not locate the Query Engine
+  // for runtime rhel-openssl-3.0.x". Trace from the repo root and explicitly copy the
+  // generated engine into the bundle. Pairs with schema.prisma binaryTargets.
+  outputFileTracingRoot: path.join(__dirname, "../../"),
+  outputFileTracingIncludes: {
+    "/**/*": ["../../node_modules/.pnpm/@prisma+client*/node_modules/.prisma/client/**/*"],
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
