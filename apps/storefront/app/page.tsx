@@ -239,7 +239,6 @@ async function ProductGrid({
                     aria-label={p.name}
                   >
                     {p.imageKeys[0] ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={cldThumb(p.imageKeys[0])}
                         alt={p.name}

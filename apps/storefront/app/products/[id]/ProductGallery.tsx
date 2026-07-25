@@ -28,7 +28,6 @@ export function ProductGallery({ images, alt }: { images: string[]; alt: string 
   return (
     <div className="space-y-3">
       <div className="aspect-square w-full overflow-hidden rounded-lg border bg-muted">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={cldDetail(current)} alt={alt} className="h-full w-full object-contain" />
       </div>
       {images.length > 1 && (
@@ -44,7 +43,6 @@ export function ProductGallery({ images, alt }: { images: string[]; alt: string 
                   i === active ? "ring-2 ring-primary ring-offset-1" : "opacity-80 hover:opacity-100"
                 }`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={cldThumb(url)} alt="" className="h-full w-full object-cover" loading="lazy" />
               </button>
             </li>
