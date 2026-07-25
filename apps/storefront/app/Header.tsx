@@ -200,11 +200,9 @@ export function Header({ isAuthed, logoutAction, storeName }: HeaderProps) {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {isAuthed ? (
-                <form action={logoutAction}>
-                  <DropdownMenuItem type="submit" variant="destructive">
-                    {t("shell.signOut")}
-                  </DropdownMenuItem>
-                </form>
+                <DropdownMenuItem variant="destructive" onClick={() => logoutAction()}>
+                  {t("shell.signOut")}
+                </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem onClick={() => router.push("/account")}>
                   {t("shell.signInRegister")}

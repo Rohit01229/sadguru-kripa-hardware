@@ -235,11 +235,12 @@ export function AdminShell({ items, user, logoutAction, storeName, children }: A
             <div className="truncate text-xs font-normal text-muted-foreground">{user.role}</div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <form action={logoutAction}>
-            <DropdownMenuItem type="submit" variant="destructive">
-              {t("shell.signOut")}
-            </DropdownMenuItem>
-          </form>
+          {/* Call the server action directly (not via a submit button): the dropdown
+              unmounts its content on select, which would abort a form submission
+              mid-flight. An imperative action call isn't tied to the form's lifecycle. */}
+          <DropdownMenuItem variant="destructive" onClick={() => logoutAction()}>
+            {t("shell.signOut")}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </Topbar>
