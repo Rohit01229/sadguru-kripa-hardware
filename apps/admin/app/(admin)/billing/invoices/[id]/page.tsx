@@ -13,6 +13,7 @@ import {
   PageHeader,
   Card,
   Badge,
+  Button,
   Table,
   TableHeader,
   TableBody,
@@ -120,7 +121,15 @@ export default async function InvoiceReprintPage({ params }: { params: Promise<{
       )}
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">{t("detail.reprintHeading")}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">{t("detail.reprintHeading")}</h2>
+          {/* Server-generated A4 PDF (react-pdf). Opens in a new tab; save/print/email from there. */}
+          <Button asChild variant="outline" size="sm">
+            <a href={`/api/billing/invoices/${id}/pdf`} target="_blank" rel="noopener noreferrer">
+              Download PDF
+            </a>
+          </Button>
+        </div>
         <ReprintClient
           invoice={invoice}
           store={{
