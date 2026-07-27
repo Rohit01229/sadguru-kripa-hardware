@@ -55,6 +55,11 @@ export function ProductForm({
   const t = useTranslations("catalog");
   const tc = useTranslations("common");
   const router = useRouter();
+  // Category/brand are controlled so the "Other…" sentinel can reveal a free-text
+  // box — the operator adds a new master inline instead of leaving to the Masters
+  // screen. The server action find-or-creates the record from that name on submit.
+  const [categoryId, setCategoryId] = useState("");
+  const [brandId, setBrandId] = useState("");
   const [baseUnitId, setBaseUnitId] = useState(units[0]?.id ?? "");
   const [rows, setRows] = useState<SaleUnitRow[]>([
     { unitId: units[0]?.id ?? "", factorToBase: "1", salePrice: "", mrp: "" },
@@ -111,26 +116,56 @@ export function ProductForm({
             <Input name="sku" />
           </FormField>
           <FormField label={t("form.category")} required>
-            <Select name="categoryId" defaultValue="">
-              <option value="" disabled>
-                {t("form.selectPlaceholder")}
-              </option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+            <div className="space-y-2">
+              <Select
+                name="categoryId"
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+              >
+                <option value="" disabled>
+                  {t("form.selectPlaceholder")}
                 </option>
-              ))}
-            </Select>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+                <option value="__other__">{t("form.optionOther")}</option>
+              </Select>
+              {categoryId === "__other__" && (
+                <Input
+                  name="categoryNameOther"
+                  placeholder={t("form.newCategory")}
+                  aria-label={t("form.newCategory")}
+                  autoFocus
+                />
+              )}
+            </div>
           </FormField>
           <FormField label={t("form.brand")} hint={t("form.brandHint")}>
-            <Select name="brandId" defaultValue="">
-              <option value="">—</option>
-              {brands.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
+            <div className="space-y-2">
+              <Select
+                name="brandId"
+                value={brandId}
+                onChange={(e) => setBrandId(e.target.value)}
+              >
+                <option value="">—</option>
+                {brands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+                <option value="__other__">{t("form.optionOther")}</option>
+              </Select>
+              {brandId === "__other__" && (
+                <Input
+                  name="brandNameOther"
+                  placeholder={t("form.newBrand")}
+                  aria-label={t("form.newBrand")}
+                  autoFocus
+                />
+              )}
+            </div>
           </FormField>
           <label className="flex min-h-[2.75rem] items-center gap-2 text-sm sm:col-span-2 sm:min-h-0">
             <Checkbox name="availableOnline" defaultChecked /> {t("form.availableOnline")}

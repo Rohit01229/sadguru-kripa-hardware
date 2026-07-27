@@ -30,7 +30,12 @@
     "statusOutOfStock": "स्टॉक ख़त्म",
     "statusLow": "कम",
     "statusOk": "ठीक",
-    "nextPage": "अगला पेज →"
+    "nextPage": "अगला पेज →",
+    "editStock": "बदलें",
+    "editStockAria": "उपलब्ध मात्रा बदलें",
+    "saveStock": "सहेजें",
+    "cancelStock": "रद्द करें",
+    "stockUpdated": "स्टॉक अपडेट हुआ"
   },
   "filter": {
     "searchPlaceholder": "नाम / SKU खोजें…",

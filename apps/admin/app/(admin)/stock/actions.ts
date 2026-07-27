@@ -7,11 +7,13 @@ import { z } from "zod";
 import {
   recordGrn,
   adjustStock,
+  setStockLevel,
   recordReturn,
   createSupplier,
   editSupplier,
   recordGrnSchema,
   adjustStockSchema,
+  setStockLevelSchema,
   recordReturnSchema,
   upsertSupplierSchema,
   DomainError,
@@ -125,6 +127,23 @@ export async function adjustStockAction(_prev: ActionState, form: FormData): Pro
     revalidatePath("/stock");
     revalidatePath("/stock/movements");
     return { ok: true, id: mv.id };
+  } catch (e) {
+    return await toState(e);
+  }
+}
+
+export async function setStockLevelAction(_prev: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    const c = await ctx();
+    const input = setStockLevelSchema.parse({
+      productId: form.get("productId"),
+      onHand: String(form.get("onHand") ?? ""),
+      reason: form.get("reason") ? String(form.get("reason")) : undefined,
+    });
+    const mv = await setStockLevel(input, c);
+    revalidatePath("/stock");
+    revalidatePath("/stock/movements");
+    return { ok: true, id: mv?.id };
   } catch (e) {
     return await toState(e);
   }

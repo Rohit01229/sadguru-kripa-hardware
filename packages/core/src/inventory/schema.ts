@@ -67,6 +67,22 @@ export const adjustStockSchema = z.object({
 });
 export type AdjustStockInput = z.infer<typeof adjustStockSchema>;
 
+// ─────────────────── Set absolute stock level (manual edit → delta adjustment) ───────────────────
+// Operators want to just type the real on-hand count; the service turns the
+// difference from the current on-hand into a signed ADJUST movement so the ledger
+// and audit trail stay intact (no silent overwrite of ProductStock).
+export const setStockLevelSchema = z.object({
+  productId: z.string().min(1),
+  /** Absolute target on-hand in BASE units (>= 0). */
+  onHand: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d+)?$/, "must be a non-negative decimal"),
+  /** Optional note; the service defaults it to a manual-edit reason. */
+  reason: z.string().trim().min(1).max(200).optional(),
+});
+export type SetStockLevelInput = z.infer<typeof setStockLevelSchema>;
+
 // ─────────────────── Returns (sales-return-in / purchase-return-out) ───────────────────
 export const recordReturnSchema = z.object({
   productId: z.string().min(1),

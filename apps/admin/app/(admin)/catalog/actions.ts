@@ -13,6 +13,9 @@ import {
   createCategory,
   createBrand,
   createUnit,
+  listCategoryTree,
+  listBrands,
+  type CategoryNode,
   createProductSchema,
   saleUnitInputSchema,
   setPriceSlabsSchema,
@@ -71,6 +74,51 @@ async function ctx() {
 
 const boolFrom = (v: FormDataEntryValue | null) => v === "on" || v === "true" || v === "1";
 
+/** Sentinel the product form submits when the operator picks "Other…" and types a new name. */
+const OTHER = "__other__";
+
+function flattenCats(nodes: CategoryNode[], out: { id: string; name: string }[] = []): { id: string; name: string }[] {
+  for (const n of nodes) {
+    out.push({ id: n.id, name: n.name });
+    if (n.children.length > 0) flattenCats(n.children, out);
+  }
+  return out;
+}
+
+/**
+ * Turn the category select into an id. When it's the "Other…" sentinel, match the
+ * typed name against existing categories case-insensitively (so we don't spawn a
+ * duplicate) and otherwise create it — then return the id the product create needs.
+ */
+async function resolveCategoryId(
+  selected: string,
+  otherName: string,
+  c: Awaited<ReturnType<typeof ctx>>,
+): Promise<string> {
+  if (selected !== OTHER) return selected;
+  const name = otherName.trim();
+  if (!name) throw new DomainError("Enter a category name.", "VALIDATION");
+  const existing = flattenCats(await listCategoryTree()).find(
+    (x) => x.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (existing) return existing.id;
+  return (await createCategory({ name }, c)).id;
+}
+
+/** Same as resolveCategoryId, but brand is optional (empty selection → null). */
+async function resolveBrandId(
+  selected: string,
+  otherName: string,
+  c: Awaited<ReturnType<typeof ctx>>,
+): Promise<string | null> {
+  if (selected !== OTHER) return selected || null;
+  const name = otherName.trim();
+  if (!name) throw new DomainError("Enter a brand name.", "VALIDATION");
+  const existing = (await listBrands()).find((b) => b.name.toLowerCase() === name.toLowerCase());
+  if (existing) return existing.id;
+  return (await createBrand({ name }, c)).id;
+}
+
 /** Parse the dynamic sale-unit rows out of a product form. */
 function parseSaleUnits(form: FormData): { unitId: string; factorToBase: string; salePrice: number; mrp: number | null; isDefault: boolean }[] {
   const unitIds = form.getAll("saleUnitId").map(String);
@@ -97,11 +145,21 @@ function parseSaleUnits(form: FormData): { unitId: string; factorToBase: string;
 export async function createProductAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   try {
     const c = await ctx();
+    const categoryId = await resolveCategoryId(
+      String(form.get("categoryId") ?? ""),
+      String(form.get("categoryNameOther") ?? ""),
+      c,
+    );
+    const brandId = await resolveBrandId(
+      String(form.get("brandId") ?? ""),
+      String(form.get("brandNameOther") ?? ""),
+      c,
+    );
     const input = createProductSchema.parse({
       sku: form.get("sku"),
       name: form.get("name"),
-      brandId: form.get("brandId") || null,
-      categoryId: form.get("categoryId"),
+      brandId,
+      categoryId,
       hsnCode: form.get("hsnCode") || null,
       baseUnitId: form.get("baseUnitId"),
       costPerBaseUnit: form.get("costPerBaseUnit") ? Math.round(Number(form.get("costPerBaseUnit")) * 100) : 0,

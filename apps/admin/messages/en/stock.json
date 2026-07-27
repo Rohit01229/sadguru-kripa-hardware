@@ -30,7 +30,12 @@
     "statusOutOfStock": "Out of stock",
     "statusLow": "Low",
     "statusOk": "OK",
-    "nextPage": "Next page →"
+    "nextPage": "Next page →",
+    "editStock": "Edit",
+    "editStockAria": "Edit on-hand quantity",
+    "saveStock": "Save",
+    "cancelStock": "Cancel",
+    "stockUpdated": "Stock updated"
   },
   "filter": {
     "searchPlaceholder": "Search name / SKU…",

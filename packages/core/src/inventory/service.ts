@@ -22,6 +22,7 @@ import type { MovementKind } from "@hardware/db";
 import {
   recordGrnSchema,
   adjustStockSchema,
+  setStockLevelSchema,
   recordReturnSchema,
   stockListQuerySchema,
   movementsQuerySchema,
@@ -30,6 +31,7 @@ import {
   editSupplierSchema,
   type RecordGrnInput,
   type AdjustStockInput,
+  type SetStockLevelInput,
   type RecordReturnInput,
   type StockListQuery,
   type MovementsQuery,
@@ -587,6 +589,70 @@ export async function adjustStock(input: AdjustStockInput, ctx: InventoryCtx): P
       requestId: ctx.requestId,
     });
 
+    return toMovementDTO(mv);
+  });
+}
+
+/**
+ * Set a product's on-hand to an absolute value (base units). The operator just
+ * types the real count; we record the DIFFERENCE from the current on-hand as a
+ * single ADJUST_IN / ADJUST_OUT movement so the ledger and audit stay intact —
+ * never a silent overwrite of ProductStock. Returns the movement, or null when
+ * the target already equals on-hand (no-op). A downward set bypasses the reserved
+ * guard (the operator is asserting the true physical count). Permission:
+ * stock.adjust.
+ */
+export async function setStockLevel(input: SetStockLevelInput, ctx: InventoryCtx): Promise<MovementDTO | null> {
+  requirePermission(ctx.session, "stock.adjust");
+  const data = setStockLevelSchema.parse(input);
+  const target = qty3(data.onHand);
+  const reason = data.reason ?? "Manual stock edit";
+
+  return await runTx(async (tx) => {
+    const product = await tx.product.findUnique({
+      where: { id: data.productId },
+      select: { id: true },
+    });
+    if (!product) throw new DomainError(`Product ${data.productId} not found`, "NOT_FOUND");
+
+    const stock = await tx.productStock.findUnique({
+      where: { productId: data.productId },
+      select: { onHand: true },
+    });
+    const current = new Decimal(stock ? stock.onHand.toString() : 0);
+    const delta = new Decimal(target.toString()).minus(current);
+    if (delta.isZero()) return null;
+
+    let movementId: string;
+    if (delta.isPositive()) {
+      movementId = await incrementStock(tx, data.productId, delta, "ADJUST_IN", {
+        refType: "ADJUSTMENT",
+        reason,
+        actorStaffId: ctx.session.userId,
+      });
+    } else {
+      // Absolute set: always apply, even below reserved (bypass the guard).
+      movementId = await decrementStock(
+        tx,
+        data.productId,
+        delta.negated(),
+        "ADJUST_OUT",
+        { refType: "ADJUSTMENT", reason, actorStaffId: ctx.session.userId },
+        true,
+      );
+    }
+
+    const mv = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
+    await audit(tx, {
+      ...auditMeta(ctx.session),
+      permissionUsed: "stock.adjust",
+      action: "stock.setLevel",
+      targetType: "Product",
+      targetId: data.productId,
+      before: { onHand: current.toString() },
+      after: { onHand: target.toString(), reason },
+      requestId: ctx.requestId,
+    });
     return toMovementDTO(mv);
   });
 }

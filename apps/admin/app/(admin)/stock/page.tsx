@@ -18,6 +18,7 @@ import {
 import { getStaffSession } from "../../../lib/session";
 import { StockNav, Forbid } from "./nav";
 import { StockFilterBar } from "./StockFilterBar";
+import { EditableStock } from "./EditableStock";
 
 // Flatten the category tree into indented options for a native <select> (children
 // prefixed with a non-breaking indent so the hierarchy is still readable).
@@ -151,9 +152,15 @@ export default async function StockPage({
                     <StockStatusBadge outOfStock={outOfStock} lowStock={r.lowStock} labels={statusLabels} />
                   </div>
                   <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                    <div className="flex justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2">
                       <dt className="text-muted-foreground">{t("list.cardOnHand")}</dt>
-                      <dd className="tabular-nums">{formatQty(r.onHand)}</dd>
+                      <dd>
+                        <EditableStock
+                          productId={r.productId}
+                          onHand={r.onHand}
+                          baseUnitCode={r.baseUnitCode}
+                        />
+                      </dd>
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-muted-foreground">{t("list.cardReserved")}</dt>
@@ -205,7 +212,13 @@ export default async function StockPage({
                       </TableCell>
                       <TableCell className="text-muted-foreground">{r.sku}</TableCell>
                       <TableCell>{r.baseUnitCode}</TableCell>
-                      <TableCell numeric>{formatQty(r.onHand)}</TableCell>
+                      <TableCell numeric>
+                        <EditableStock
+                          productId={r.productId}
+                          onHand={r.onHand}
+                          baseUnitCode={r.baseUnitCode}
+                        />
+                      </TableCell>
                       <TableCell numeric>{formatQty(r.reserved)}</TableCell>
                       <TableCell numeric>{formatQty(r.available)}</TableCell>
                       <TableCell numeric>
