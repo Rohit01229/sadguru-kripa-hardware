@@ -12,7 +12,14 @@ import {
   sessionCookieOptions,
   PLATFORM_COOKIE,
 } from "@hardware/auth";
-import { provisionShop, setShopStatus, DomainError } from "@hardware/core";
+import {
+  provisionShop,
+  setShopStatus,
+  assignPlan,
+  recordSubscriptionPayment,
+  cancelSubscription,
+  DomainError,
+} from "@hardware/core";
 import { requirePlatformSession, requireSuperAdmin } from "../../lib/platform-session";
 import { requestId } from "../../lib/logger";
 
@@ -158,4 +165,62 @@ export async function setShopStatusAction(
 export async function currentPlatformRole(): Promise<string | null> {
   const s = await requirePlatformSession();
   return s.role;
+}
+
+// ── Subscriptions (16 §8 P4) ──
+// No payment gateway: the operator collects on UPI/bank transfer and records it here.
+// See doc 16 — wiring a gateway is a merchant-onboarding decision, not a code one.
+
+export async function assignPlanAction(
+  shopId: string,
+  planKey: string,
+  trialDays: number,
+): Promise<PlatformState> {
+  try {
+    const session = await requireSuperAdmin();
+    await assignPlan(
+      { shopId, planKey, trialDays },
+      { platformUserId: session.id, requestId: await requestId() },
+    );
+    revalidatePath("/platform");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof DomainError) return { error: e.message };
+    return { error: "Could not change the plan." };
+  }
+}
+
+export async function recordPaymentAction(
+  shopId: string,
+  amountRupees: string,
+  method: string,
+  months: number,
+  reference?: string,
+): Promise<PlatformState> {
+  try {
+    const session = await requireSuperAdmin();
+    const paise = Math.round(Number(amountRupees) * 100);
+    if (!Number.isFinite(paise) || paise <= 0) return { error: "Enter a valid amount." };
+    await recordSubscriptionPayment(
+      { shopId, amountPaise: paise, method, months, reference: reference || null },
+      { platformUserId: session.id, requestId: await requestId() },
+    );
+    revalidatePath("/platform");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof DomainError) return { error: e.message };
+    return { error: "Could not record the payment." };
+  }
+}
+
+export async function cancelSubscriptionAction(shopId: string): Promise<PlatformState> {
+  try {
+    const session = await requireSuperAdmin();
+    await cancelSubscription(shopId, { platformUserId: session.id, requestId: await requestId() });
+    revalidatePath("/platform");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof DomainError) return { error: e.message };
+    return { error: "Could not cancel the subscription." };
+  }
 }

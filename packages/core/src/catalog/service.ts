@@ -18,6 +18,7 @@ import type { Id } from "../shared/types";
 // takes when it seeds CSV opening stock).
 import { incrementStock } from "../inventory/service";
 import { ensureDefaultMasters } from "./defaults";
+import { assertWithinPlan } from "../platform/billing";
 import {
   createProductSchema,
   updateProductSchema,
@@ -447,6 +448,9 @@ function auditMeta(session: Session) {
 export async function createProduct(input: CreateProductInput, ctx: MutationCtx): Promise<ProductDetail> {
   requirePermission(ctx.session, "products.create");
   const shopId = requireShop(ctx.session);
+  // Plan ceiling (16 §8 P4). Refuses the NEXT item with a clear message; never
+  // interrupts something already in progress.
+  await assertWithinPlan(shopId, "products");
   const data = createProductSchema.parse(input);
 
   const autoSku = !data.sku;

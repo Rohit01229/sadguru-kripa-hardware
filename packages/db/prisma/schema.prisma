@@ -887,3 +887,82 @@ model EwayBill {
   @@index([shopId])
   @@index([shopId, status])
 }
+
+// ──────────────────── Plans & subscriptions (16 §4a, §8 P4) ────────────────────
+// What turns "shops exist" into "shops pay". Deliberately does NOT include a payment
+// gateway: a small SaaS operator starts by collecting on UPI or bank transfer and
+// recording it, and wiring a gateway is a merchant-onboarding decision, not a schema
+// one. SubscriptionPayment below is that ledger, and a gateway can write to it later.
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE // past the period end and unpaid — warned, never cut off mid-sale
+  CANCELLED
+}
+
+model Plan {
+  id                  String  @id @default(cuid())
+  /// Stable key used in code (FREE / STARTER / PRO). Names can change; keys cannot.
+  key                 String  @unique
+  name                String
+  /// Monthly price in paise (04 §2). 0 for a free tier.
+  pricePaise          Int     @default(0)
+  /// null anywhere below means UNLIMITED — absence of a limit, not zero.
+  maxProducts         Int?
+  maxInvoicesPerMonth Int?
+  maxStaff            Int?
+  /// Feature switches, e.g. { "storefront": true, "einvoice": false }. JSON so a new
+  /// flag does not need a migration; read through a typed accessor in core.
+  features            Json?
+  isActive            Boolean @default(true)
+  sortOrder           Int     @default(0)
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id     String @id @default(cuid())
+  /// One live subscription per shop.
+  shopId String @unique
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  status           SubscriptionStatus @default(TRIALING)
+  /// While set and in the future, the shop is on trial regardless of payment.
+  trialEndsAt      DateTime?
+  /// Paid up to this moment. Past it with no payment → PAST_DUE.
+  currentPeriodEnd DateTime?
+  cancelledAt      DateTime?
+  /// Free-text for the operator ("moved to annual", "discount agreed").
+  notes            String?
+
+  payments  SubscriptionPayment[]
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@index([status])
+}
+
+/// Money actually received. Recorded by the operator today; a gateway can append here.
+model SubscriptionPayment {
+  id             String       @id @default(cuid())
+  shopId         String
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  amountPaise  Int
+  /// UPI | BANK | CASH | OTHER — free-form so it is not a migration to add one.
+  method       String
+  reference    String?
+  paidAt       DateTime @default(now())
+  /// The period this payment covers, so the ledger explains the period end.
+  periodStart  DateTime
+  periodEnd    DateTime
+  /// PlatformUser who recorded it.
+  recordedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([shopId])
+  @@index([subscriptionId])
+}

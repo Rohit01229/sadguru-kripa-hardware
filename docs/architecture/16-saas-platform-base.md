@@ -209,7 +209,7 @@ Each phase is shippable; we do the plumbing before the polish.
 **P3 — Share & templates** ✅ DONE
 - WhatsApp/email share of the PDF; build the per-shop **bill editor** (plan 15, now tenant-scoped); thermal/A4 print polish.
 
-**P4 — SaaS business features**
+**P4 — SaaS business features** ✅ plans/subscriptions/limits DONE (no gateway — operator records payments); per-shop subdomains outstanding
 - Subscription enforcement (limits per plan), trials/expiry, per-shop subdomains, billing the shops. *(Self-serve signup deferred — shops are provisioned by the super-admin.)*
 
 **P5 — Advanced GST (Enterprise tier)** ◻ scoped in doc 20; e-way bill built, e-invoicing deferred

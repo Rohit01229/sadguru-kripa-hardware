@@ -1,20 +1,28 @@
-import { listShops } from "@hardware/core";
+import { listShops, listPlans, getSubscription } from "@hardware/core";
 import { Badge, Card, CardContent, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, formatDate } from "@hardware/ui";
 import { requirePlatformSession } from "../../lib/platform-session";
 import { platformLogoutAction } from "./actions";
 import { ProvisionShopDialog } from "./ProvisionShopDialog";
 import { ShopStatusButton } from "./ShopStatusButton";
 import { LogoutButton } from "./LogoutButton";
+import { SubscriptionCell } from "./SubscriptionCell";
 
 // Platform console — the super-admin's shop list (16 §4a, §8 P1).
 // Guarded by the PLATFORM realm; a shop login cannot reach this page.
 export default async function PlatformConsolePage() {
   const session = await requirePlatformSession();
   const shops = await listShops();
+  // Plans + each shop's subscription, for the billing column.
+  const plans = await listPlans();
+  const subs = new Map(
+    await Promise.all(shops.map(async (s) => [s.id, await getSubscription(s.id)] as const)),
+  );
   const canManage = session.role === "SUPER_ADMIN";
 
   const active = shops.filter((s) => s.status === "ACTIVE").length;
   const totalInvoices = shops.reduce((n, s) => n + s.counts.invoices, 0);
+  const paying = [...subs.values()].filter((x) => x?.status === "ACTIVE" && x.plan.pricePaise > 0).length;
+  const needsAttention = [...subs.values()].filter((x) => x?.needsAttention).length;
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
@@ -29,7 +37,7 @@ export default async function PlatformConsolePage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Shops</div>
@@ -44,8 +52,14 @@ export default async function PlatformConsolePage() {
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Invoices raised</div>
-            <div className="text-2xl font-semibold tabular-nums">{totalInvoices}</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Paying</div>
+            <div className="text-2xl font-semibold tabular-nums">{paying}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Need attention</div>
+            <div className="text-2xl font-semibold tabular-nums">{needsAttention}</div>
           </CardContent>
         </Card>
       </div>
@@ -67,6 +81,7 @@ export default async function PlatformConsolePage() {
                 <TableHead>Shop</TableHead>
                 <TableHead>Owner</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Billing</TableHead>
                 <TableHead numeric>Items</TableHead>
                 <TableHead numeric>Bills</TableHead>
                 <TableHead numeric>Parties</TableHead>
@@ -91,6 +106,14 @@ export default async function PlatformConsolePage() {
                     ) : (
                       <Badge variant="destructive">Suspended</Badge>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <SubscriptionCell
+                      shopId={s.id}
+                      shopName={s.name}
+                      subscription={subs.get(s.id) ?? null}
+                      plans={plans}
+                    />
                   </TableCell>
                   <TableCell numeric>{s.counts.products}</TableCell>
                   <TableCell numeric>{s.counts.invoices}</TableCell>

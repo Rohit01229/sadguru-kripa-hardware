@@ -7,6 +7,7 @@
 import Decimal from "decimal.js";
 import { Prisma, prisma, runTx, type Tx } from "../shared/db";
 import { audit } from "../shared/audit";
+import { assertWithinPlan } from "../platform/billing";
 import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";
 import { toPaise, fromPaise } from "../shared/money";
@@ -359,6 +360,9 @@ async function finalizePakkaTx(
 ): Promise<InvoiceDTO> {
   requirePermission(ctx.session, "bill.pakka.create");
   const shopId = requireShop(ctx.session);
+  // Monthly bill ceiling (16 §8 P4). Checked BEFORE any stock moves or a number is
+  // drawn, so hitting the limit costs nothing and leaves no gap in the invoice series.
+  await assertWithinPlan(shopId, "invoicesPerMonth");
 
   // KHATA / part-payment posts the unpaid balance to the customer ledger (S5 — wired
   // below via ledger.post inside the SAME invoice tx). A khata sale MUST name an

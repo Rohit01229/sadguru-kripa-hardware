@@ -52,6 +52,19 @@ export default async function SettingsPage() {
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div>
+            <p className="text-sm font-medium">Your plan</p>
+            <p className="text-xs text-muted-foreground">
+              See your plan, limits and how much you have used.
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/settings/subscription">View</Link>
+          </Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
             <p className="text-sm font-medium">Quick sign-in</p>
             <p className="text-xs text-muted-foreground">
               Use a 4-digit PIN on this device instead of your password.

@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { can, getStoreConfig, type Session } from "@hardware/core";
+import { can, getStoreConfig, type Session, getSubscription } from "@hardware/core";
+import { SubscriptionBanner } from "./SubscriptionBanner";
 import { getStaffSession, requireShopId } from "../../lib/session";
 import { logoutAction } from "./logout/actions";
 import { AdminShell, type NavItem } from "./AdminShell";
@@ -60,8 +61,13 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     /* keep default */
   }
 
+  // Billing state for the warning strip. Read-only and cheap; never blocks the app —
+  // a lapsed subscription warns, only an operator suspension stops sign-in (16 §8 P4).
+  const subscription = session.shopId ? await getSubscription(session.shopId) : null;
+
   return (
     <AdminShell items={items} user={user} logoutAction={logoutAction} storeName={storeName}>
+      <SubscriptionBanner subscription={subscription} />
       {children}
     </AdminShell>
   );
