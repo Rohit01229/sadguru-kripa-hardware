@@ -29,3 +29,4 @@ export * from "./dashboard/service";
 export * from "./jobs/service";
 export * from "./jobs/backup";
 export * from "./platform/shops"; // tenant resolution (17 — multi-tenancy)
+export * from "./platform/provision"; // P1 super-admin: provision/list/suspend shops

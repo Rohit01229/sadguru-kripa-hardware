@@ -13,6 +13,12 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  // `redirect()` and `notFound()` work by THROWING a control-flow error. If this
+  // boundary rendered its "something went wrong" card for those, a guard that redirects
+  // an unauthenticated visitor would show an error page instead of the login screen.
+  // Re-throw them so Next can do its job; only real failures reach the card below.
+  if (isControlFlowError(error)) throw error;
+
   React.useEffect(() => {
     // Surface for server log correlation without leaking details to the UI.
     console.error(error);
@@ -35,4 +41,14 @@ export default function Error({
       <Button onClick={reset}>Try again</Button>
     </main>
   );
+}
+
+/**
+ * True for Next's internal control-flow errors — the ones `redirect()` and `notFound()`
+ * throw. Next tags them on `digest` ("NEXT_REDIRECT" / "NEXT_NOT_FOUND"); we match on
+ * the prefix so a redirect's appended status code still matches.
+ */
+function isControlFlowError(error: Error & { digest?: string }): boolean {
+  const digest = typeof error.digest === "string" ? error.digest : "";
+  return digest.startsWith("NEXT_REDIRECT") || digest === "NEXT_NOT_FOUND";
 }

@@ -129,6 +129,38 @@ model Shop {
   updatedAt DateTime @updatedAt
 }
 
+// ──────────────────── Auth realm: PLATFORM (super-admin) ────────────────────
+// The operator of the SaaS — you. A THIRD realm, deliberately separate from shop
+// staff and storefront customers (16 §5e): its own table, its own cookie, its own
+// session rows. A platform session can never satisfy a shop guard and vice-versa,
+// so a compromised shop login can never reach the console that creates shops.
+//
+// Platform users are NOT scoped to a shopId — that is the whole point: they act
+// across tenants. Every cross-tenant action they take is audited.
+model PlatformUser {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  passwordHash String
+  name         String
+  status       String            @default("ACTIVE") // ACTIVE | DISABLED
+  /// SUPER_ADMIN can create/suspend shops; SUPPORT is read-only + impersonate.
+  role         String            @default("SUPER_ADMIN")
+  sessions     PlatformSession[]
+  lastLoginAt  DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model PlatformSession {
+  id             String       @id @default(cuid())
+  platformUserId String
+  platformUser   PlatformUser @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+
+  @@index([platformUserId])
+}
+
 // ──────────────────── Auth realm: STAFF ────────────────────
 model StaffUser {
   id            String         @id @default(cuid())

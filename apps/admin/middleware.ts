@@ -9,12 +9,25 @@ import { NextResponse, type NextRequest } from "next/server";
 // Runs in the Edge runtime — must NOT import @hardware/auth (it pulls in the
 // Prisma client). The cookie name is the stable constant `STAFF_COOKIE`.
 const STAFF_COOKIE = "hw.staff.session";
+const PLATFORM_COOKIE = "hw.platform.session";
 
 export function middleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const hasSession = req.cookies.has(STAFF_COOKIE);
   const isAuthRoute = pathname.startsWith("/login");
   const isApi = pathname.startsWith("/api");
+  // The platform (super-admin) console is a DIFFERENT realm with its own cookie. Gate it
+  // here the same coarse way, against ITS cookie — sending an operator to the shop login
+  // would be wrong, and they never hold a staff session. The authoritative check still
+  // runs server-side in lib/platform-session; this just avoids rendering the page first.
+  if (pathname.startsWith("/platform")) {
+    const isPlatformLogin = pathname.startsWith("/platform/login");
+    if (!req.cookies.has(PLATFORM_COOKIE) && !isPlatformLogin) {
+      return NextResponse.redirect(new URL("/platform/login", req.url));
+    }
+    return NextResponse.next();
+  }
+
   if (!hasSession && !isAuthRoute && !isApi) {
     return NextResponse.redirect(new URL("/login", req.url));
   }

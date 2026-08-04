@@ -29,6 +29,19 @@ export async function loginStaff(email: string, password: string): Promise<Login
   return { ok: true, userId: user.id };
 }
 
+/**
+ * Verify PLATFORM (super-admin) credentials — 16 §4a. Same argon2id check as staff, but
+ * against its own table so the realms can never be confused. Records the login time so
+ * an unused super-admin account is visible.
+ */
+export async function loginPlatform(email: string, password: string): Promise<LoginResult> {
+  const user = await prisma.platformUser.findUnique({ where: { email: email.toLowerCase() } });
+  if (!user || user.status !== "ACTIVE") return { ok: false };
+  if (!(await verifyPassword(password, user.passwordHash))) return { ok: false };
+  await prisma.platformUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+  return { ok: true, userId: user.id };
+}
+
 /** Verify customer credentials. Requires a verified email before login (07 §1). */
 export async function loginCustomer(email: string, password: string): Promise<LoginResult> {
   const account = await prisma.customerAccount.findUnique({
