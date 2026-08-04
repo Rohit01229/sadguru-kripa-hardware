@@ -191,28 +191,28 @@ Concrete rules for the shop-owner app so it *feels* like myBillBook:
 
 Each phase is shippable; we do the plumbing before the polish.
 
-**P0 — Multi-tenant foundation (biggest, do first)**
+**P0 — Multi-tenant foundation (biggest, do first)** ✅ DONE
 - Add `Shop`, `ShopMembership`, `Plan`/`Subscription` models; add `shopId` to every business table; per-shop `StoreConfig` + counters; composite uniqueness per shop.
 - Scoped core context (`ctx.shopId` + `forShop()` accessor); refactor all services + pages to require it.
 - Migrate the existing single shop into "Shop #1" (data migration).
 - *Risk:* large, careful migration — but mechanical. This is the make-or-break slice.
 
-**P1 — Platform super-admin**
+**P1 — Platform super-admin** ✅ DONE
 - New realm + app: create/suspend shops, assign owners, set plan/limits, impersonate (audited), usage view.
 - Shop provisioning flow (create shop → create owner → seed defaults + starter templates).
 
-**P2 — Shop auth + onboarding + simplicity re-skin**
+**P2 — Shop auth + onboarding + simplicity re-skin** ◑ onboarding wizard + simplicity re-skin DONE; OTP login outstanding
 - OTP phone login for shop users; owner→staff invites + roles.
 - 3-step onboarding wizard; Excel bulk import (items + parties).
 - Rebuild the shop home around **one-screen billing** + the simplicity playbook (§6).
 
-**P3 — Share & templates**
+**P3 — Share & templates** ✅ DONE
 - WhatsApp/email share of the PDF; build the per-shop **bill editor** (plan 15, now tenant-scoped); thermal/A4 print polish.
 
 **P4 — SaaS business features**
 - Subscription enforcement (limits per plan), trials/expiry, per-shop subdomains, billing the shops. *(Self-serve signup deferred — shops are provisioned by the super-admin.)*
 
-**P5 — Advanced GST (Enterprise tier)**
+**P5 — Advanced GST (Enterprise tier)** ◻ scoped in doc 20; e-way bill built, e-invoicing deferred
 - e-invoice (IRN/QR) + e-way bill via a GSP/IRP integration.
 
 ---

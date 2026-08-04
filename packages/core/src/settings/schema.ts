@@ -24,7 +24,9 @@ export const updateStoreConfigSchema = z
     name: z.string().trim().min(1).max(200).optional(),
     gstin: gstin.nullable().optional(),
     homeState: stateCode.optional(),
-    address: z.string().trim().max(1000).nullable().optional(),
+    /** Shop phone printed on bills when the theme shows contact details. */
+  phone: z.string().trim().max(20).nullable().optional(),
+  address: z.string().trim().max(1000).nullable().optional(),
     logoKey: z.string().trim().max(500).nullable().optional(),
     bankDetails: z.string().trim().max(2000).nullable().optional(),
     invoiceTerms: z.string().trim().max(2000).nullable().optional(),

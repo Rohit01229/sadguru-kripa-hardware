@@ -446,8 +446,8 @@ model CreditNoteCounter {
 
 model StoreConfig {
   // One row per shop (17). `id` stays the PK (cuid); `shopId` is the lookup key.
-  id                    String   @id @default(cuid())
-  shopId                String   @unique
+  id                    String    @id @default(cuid())
+  shopId                String    @unique
   name                  String
   gstin                 String?
   homeState             String // intra/inter-state decision (03 §8)
@@ -455,11 +455,18 @@ model StoreConfig {
   logoKey               String?
   bankDetails           String?
   invoiceTerms          String?
-  invoicePrefixFormat   String   @default("{FY}/{SEQ6}")
-  deliveryFlatFee       Decimal  @default(0) @db.Decimal(14, 2)
-  freeDeliveryThreshold Decimal? @db.Decimal(14, 2)
-  reservationTtlMinutes Int      @default(30)
-  gstRoundingMode       String   @default("PER_INVOICE")
+  invoicePrefixFormat   String    @default("{FY}/{SEQ6}")
+  deliveryFlatFee       Decimal   @default(0) @db.Decimal(14, 2)
+  freeDeliveryThreshold Decimal?  @db.Decimal(14, 2)
+  reservationTtlMinutes Int       @default(30)
+  gstRoundingMode       String    @default("PER_INVOICE")
+  /// Shop phone, printed on bills when the theme's "show contact" toggle is on.
+  /// Without this the toggle had nothing to render (19 §7).
+  phone                 String?
+  /// Set when the owner finishes (or skips) the first-run wizard — 16 §6. Null means
+  /// "never onboarded", which is what routes them to /welcome on first sign-in. An
+  /// explicit stamp, not inferred from having products, so skipping stays skipped.
+  onboardedAt           DateTime?
   /// Bill theme JSON (19 §7) — colours/fonts/toggles for printed bills. Cosmetic
   /// only: GST-mandatory elements are not expressible as hideable. Null = defaults.
   billTheme             Json?

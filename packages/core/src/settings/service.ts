@@ -32,6 +32,7 @@ export interface FullStoreConfigDTO {
   name: string;
   gstin: string | null;
   homeState: string;
+  phone: string | null;
   address: string | null;
   logoKey: string | null;
   bankDetails: string | null;
@@ -48,6 +49,7 @@ function toDTO(s: {
   name: string;
   gstin: string | null;
   homeState: string;
+  phone: string | null;
   address: string | null;
   logoKey: string | null;
   bankDetails: string | null;
@@ -63,6 +65,7 @@ function toDTO(s: {
     name: s.name,
     gstin: s.gstin,
     homeState: s.homeState,
+    phone: s.phone,
     address: s.address,
     logoKey: s.logoKey,
     bankDetails: s.bankDetails,
@@ -103,6 +106,7 @@ export async function updateStoreConfig(
     if (data.name !== undefined) patch.name = data.name;
     if (data.gstin !== undefined) patch.gstin = data.gstin;
     if (data.homeState !== undefined) patch.homeState = data.homeState;
+    if (data.phone !== undefined) patch.phone = data.phone;
     if (data.address !== undefined) patch.address = data.address;
     if (data.logoKey !== undefined) patch.logoKey = data.logoKey;
     if (data.bankDetails !== undefined) patch.bankDetails = data.bankDetails;
@@ -192,3 +196,4 @@ export async function updateBillTheme(input: unknown, ctx: SettingsCtx): Promise
 // Re-export the settings Zod surface so transport imports validation from @hardware/core only.
 export * from "./schema";
 export * from "./billTheme";
+export * from "./onboarding";

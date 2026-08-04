@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { getDashboard, requirePermission, can, Forbidden } from "@hardware/core";
+import { getDashboard, getOnboardingState, requirePermission, can, Forbidden } from "@hardware/core";
 import {
   PageHeader,
   StatCard,
@@ -36,6 +36,14 @@ import { getStaffSession, requireShopId } from "../../../lib/session";
 export default async function DashboardPage() {
   const session = await getStaffSession();
   if (!session) redirect("/login");
+
+  // A shop that has never been set up gets the first-run wizard instead of an empty
+  // dashboard (16 §6). Only the owner can complete it, so staff are not bounced into a
+  // screen they cannot finish. The flag is explicit, so skipping stays skipped.
+  if (can(session, "settings.write") && session.shopId) {
+    const onboarding = await getOnboardingState(session.shopId);
+    if (onboarding.pending) redirect("/welcome");
+  }
 
   const t = await getTranslations("dashboard");
   const tc = await getTranslations("common");
