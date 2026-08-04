@@ -24,7 +24,7 @@ import {
   formatMoney,
   formatQty,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 
 // Admin dashboard (S7): a cross-module roll-up — today's pakka sales, low stock, dues,
 // top items (03 §3: reports read across modules). Guarded with products.read; the
@@ -91,7 +91,8 @@ export default async function DashboardPage() {
 
 /** The cross-module roll-up (today's sales, low stock, dues, top items). Slow region. */
 async function DashboardRollup() {
-  const dash = await getDashboard();
+  const shopId = await requireShopId();
+  const dash = await getDashboard(shopId);
   const t = await getTranslations("dashboard");
   return (
     <>

@@ -16,7 +16,7 @@ import {
   EmptyState,
   formatDateTime,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { AuditFilterBar } from "./AuditFilterBar";
 
 // Audit viewer (S7; audit.read). Append-only log browser (10 §7) — the log is never
@@ -43,7 +43,8 @@ export default async function AuditPage({
   }
 
   const sp = await searchParams;
-  const page = await listAudit({
+  const shopId = await requireShopId();
+  const page = await listAudit(shopId, {
     action: sp.action,
     targetType: sp.targetType,
     from: sp.from,

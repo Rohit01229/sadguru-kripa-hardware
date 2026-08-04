@@ -28,7 +28,7 @@ import {
   formatMoney,
   formatQty,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { CatalogFilterBar } from "./CatalogFilterBar";
 
 // Product list (S2): server-side search + filter (category / brand / in-stock /
@@ -93,7 +93,8 @@ export default async function CatalogPage({
 
   // Only the fast filter-option reads stay at the page level (they populate the filter
   // bar selects). The slow product list streams separately via <Suspense> below.
-  const [brands, tree] = await Promise.all([listBrands(), listCategoryTree()]);
+  const shopId = await requireShopId();
+  const [brands, tree] = await Promise.all([listBrands(shopId), listCategoryTree(shopId)]);
   const categories = flatten(tree);
 
   const isFiltered = Boolean(
@@ -112,6 +113,9 @@ export default async function CatalogPage({
             </Button>
             <Button variant="outline" asChild>
               <Link href="/catalog/import">{t("list.importLink")}</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/catalog/labels">{t("labels.breadcrumb")}</Link>
             </Button>
             <Button asChild>
               <Link href="/catalog/new">{t("list.newProduct")}</Link>
@@ -165,7 +169,8 @@ async function CatalogResults({
   isFiltered: boolean;
 }) {
   const t = await getTranslations("catalog");
-  const page = await listProducts({
+  const shopId = await requireShopId();
+  const page = await listProducts(shopId, {
     q: sp.q,
     categoryId: sp.categoryId,
     brandId: sp.brandId,

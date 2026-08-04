@@ -17,7 +17,7 @@ import {
   formatMoney,
   type DataTableColumn,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { LedgerNav, Forbid } from "./nav";
 import { CustomerForm } from "./CustomerForm";
 import { LedgerFilterBar } from "./LedgerFilterBar";
@@ -71,7 +71,8 @@ export default async function LedgerDirectoryPage({
   const agingBucket = parseAgingBucket(sp.aging);
   const isFiltered = Boolean(q) || hasOutstanding || agingBucket !== undefined;
 
-  const page = await listCustomers({
+  const shopId = await requireShopId();
+  const page = await listCustomers(shopId, {
     q,
     ...(hasOutstanding ? { hasOutstanding: true } : {}),
     ...(agingBucket ? { agingBucket } : {}),
@@ -79,7 +80,7 @@ export default async function LedgerDirectoryPage({
   });
   // Per-customer aging (the directory shows the outstanding + 60+ flag at a glance).
   const withAging: Row[] = await Promise.all(
-    page.data.map(async (c) => ({ customer: c, age: await aging(c.id) })),
+    page.data.map(async (c) => ({ customer: c, age: await aging(shopId, c.id) })),
   );
   const canCreate = can(session, "customers.write");
 

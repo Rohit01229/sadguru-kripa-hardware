@@ -16,7 +16,7 @@ import {
   formatMoney,
   formatQty,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { ReportsNav, Forbid } from "../nav";
 import { SalesFilterBar } from "./SalesFilterBar";
 
@@ -39,7 +39,8 @@ export default async function SalesReportPage({
   }
 
   const sp = await searchParams;
-  const report = await salesReport({ from: sp.from, to: sp.to, groupBy: sp.groupBy as GroupBy | undefined });
+  const shopId = await requireShopId();
+  const report = await salesReport(shopId, { from: sp.from, to: sp.to, groupBy: sp.groupBy as GroupBy | undefined });
   const t = await getTranslations("reports");
   const hasFilters = Boolean(sp.from || sp.to || (sp.groupBy && sp.groupBy !== "day"));
   const showQty = report.groupBy === "item" || report.groupBy === "category";

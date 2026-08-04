@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSupplierDues, requirePermission } from "@hardware/core";
+import { getSupplierDues, requireShop, requirePermission } from "@hardware/core";
 import { getStaffSession } from "../../../../../lib/session";
 import { requestId } from "../../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../../lib/http";
@@ -15,8 +15,9 @@ export async function GET(
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "suppliers.read");
+    const shopId = requireShop(session);
     const { id } = await params;
-    const dues = await getSupplierDues(id);
+    const dues = await getSupplierDues(shopId, id);
     return NextResponse.json(dues);
   } catch (e) {
     return errorResponse(e, rid);

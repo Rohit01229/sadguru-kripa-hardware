@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
-import { getStoreConfig } from "@hardware/core";
+import { getPrimaryShopId, getStoreConfig } from "@hardware/core";
 import { Toaster } from "@hardware/ui";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
@@ -13,7 +13,8 @@ import { PwaRegister } from "./PwaRegister";
 export async function generateMetadata(): Promise<Metadata> {
   let name = "My Hardware Store";
   try {
-    const config = await getStoreConfig();
+    const shopId = await getPrimaryShopId();
+    const config = shopId ? await getStoreConfig(shopId) : null;
     if (config?.name) name = config.name;
   } catch {
     // StoreConfig unavailable (e.g. DB not reachable) — keep the fallback.

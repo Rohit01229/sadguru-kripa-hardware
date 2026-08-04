@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { nearExpiry, requirePermission, nearExpiryQuerySchema } from "@hardware/core";
+import { nearExpiry, requireShop, requirePermission, nearExpiryQuerySchema } from "@hardware/core";
 import { getStaffSession } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
@@ -13,12 +13,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "stock.read");
+    const shopId = requireShop(session);
 
     const sp = req.nextUrl.searchParams;
     const query = nearExpiryQuerySchema.parse({
       withinDays: sp.get("withinDays") ? Number(sp.get("withinDays")) : undefined,
     });
-    const rows = await nearExpiry(query);
+    const rows = await nearExpiry(shopId, query);
     return NextResponse.json({ data: rows });
   } catch (e) {
     return errorResponse(e, rid);

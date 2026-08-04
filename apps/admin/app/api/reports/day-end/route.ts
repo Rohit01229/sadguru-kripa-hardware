@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { dayEnd, requirePermission, dayEndQuerySchema } from "@hardware/core";
+import { dayEnd, requireShop, requirePermission, dayEndQuerySchema } from "@hardware/core";
 import { getStaffSession } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
@@ -12,10 +12,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "reports.read");
+    const shopId = requireShop(session);
 
     const sp = req.nextUrl.searchParams;
     const query = dayEndQuerySchema.parse({ date: sp.get("date") ?? undefined });
-    const report = await dayEnd(query);
+    const report = await dayEnd(shopId, query);
     return NextResponse.json(report);
   } catch (e) {
     return errorResponse(e, rid);

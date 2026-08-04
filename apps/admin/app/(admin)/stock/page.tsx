@@ -15,7 +15,7 @@ import {
   EmptyState,
   formatQty,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { StockNav, Forbid } from "./nav";
 import { StockFilterBar } from "./StockFilterBar";
 import { EditableStock } from "./EditableStock";
@@ -77,9 +77,10 @@ export default async function StockPage({
   const sp = await searchParams;
   const lowOnly = sp.lowOnly === "true";
   const categoryId = sp.categoryId || undefined;
+  const shopId = await requireShopId();
   const [page, categoryTree] = await Promise.all([
-    listStock({ q: sp.q, lowOnly, categoryId, cursor: sp.cursor, limit: 50 }),
-    listCategoryTree(),
+    listStock(shopId, { q: sp.q, lowOnly, categoryId, cursor: sp.cursor, limit: 50 }),
+    listCategoryTree(shopId),
   ]);
   const categories = flattenCategories(categoryTree);
 

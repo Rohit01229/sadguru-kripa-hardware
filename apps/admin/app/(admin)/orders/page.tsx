@@ -15,7 +15,7 @@ import {
   formatDateTime,
   type DataTableColumn,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { FulfilButtons } from "./FulfilButtons";
 import { OrdersDateFilter } from "./OrdersDateFilter";
 import { statusVariant, paymentVariant } from "./status";
@@ -126,7 +126,8 @@ async function OrdersTable({
   isFiltered: boolean;
 }) {
   const t = await getTranslations("orders");
-  const page = await listOrdersAdmin({
+  const shopId = await requireShopId();
+  const page = await listOrdersAdmin(shopId, {
     status,
     ...(from ? { from } : {}),
     ...(toBound ? { to: toBound } : {}),

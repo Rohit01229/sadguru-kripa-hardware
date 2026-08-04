@@ -19,7 +19,7 @@ interface Res {
 let reservations: Res[] = [];
 // Track ProductStock.reserved decrements the raw UPDATE would apply.
 let reservedDecrements: { productId: string; qty: string }[] = [];
-let auditRows: { action: string }[] = [];
+let auditRows: { action: string; shopId: string }[] = [];
 
 vi.mock("../shared/db", async () => {
   const decimal = await vi.importActual<typeof DecimalModule>("decimal.js");
@@ -45,8 +45,8 @@ vi.mock("../shared/db", async () => {
       return 1;
     }),
     auditLog: {
-      create: vi.fn(async ({ data }: { data: { action: string } }) => {
-        auditRows.push({ action: data.action });
+      create: vi.fn(async ({ data }: { data: { action: string; shopId: string } }) => {
+        auditRows.push({ action: data.action, shopId: data.shopId });
         return { id: `aud_${auditRows.length}` };
       }),
     },
@@ -75,29 +75,30 @@ describe("jobs.runReservationExpiry — idempotent release", () => {
 
   it("releases only ACTIVE reservations past expiry on the first run", async () => {
     const now = new Date("2026-06-29T10:00:00Z");
-    const res = await runReservationExpiry(now);
+    const res = await runReservationExpiry("shop_test", now);
     expect(res.released).toBe(2); // r1 + r2 expired; r3 not yet
     expect(reservations.find((r) => r.id === "r1")!.status).toBe("EXPIRED");
     expect(reservations.find((r) => r.id === "r2")!.status).toBe("EXPIRED");
     expect(reservations.find((r) => r.id === "r3")!.status).toBe("ACTIVE");
     expect(auditRows).toHaveLength(1); // audited once (something was freed)
     expect(auditRows[0]!.action).toBe("job.reservation-expiry");
+    expect(auditRows[0]!.shopId).toBe("shop_test"); // system audit attributed to the shop (17)
   });
 
   it("a SECOND run releases nothing more (idempotent redelivery)", async () => {
     const now = new Date("2026-06-29T10:00:00Z");
-    await runReservationExpiry(now);
+    await runReservationExpiry("shop_test", now);
     reservedDecrements = [];
     auditRows = [];
-    const second = await runReservationExpiry(now);
+    const second = await runReservationExpiry("shop_test", now);
     expect(second.released).toBe(0); // already EXPIRED — no double-free
     expect(reservedDecrements).toHaveLength(0); // no stock decremented twice
     expect(auditRows).toHaveLength(0); // no audit when nothing freed
   });
 
   it("releases r3 once its own expiry passes on a later run", async () => {
-    await runReservationExpiry(new Date("2026-06-29T10:00:00Z"));
-    const later = await runReservationExpiry(new Date("2026-06-29T13:00:00Z"));
+    await runReservationExpiry("shop_test", new Date("2026-06-29T10:00:00Z"));
+    const later = await runReservationExpiry("shop_test", new Date("2026-06-29T13:00:00Z"));
     expect(later.released).toBe(1); // r3 now expired
     expect(reservations.find((r) => r.id === "r3")!.status).toBe("EXPIRED");
   });

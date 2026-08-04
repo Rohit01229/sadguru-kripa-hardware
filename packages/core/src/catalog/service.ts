@@ -5,13 +5,19 @@
 // paise on the wire (04 §2), converted to/from Prisma Decimal here; the tested
 // uom.toBaseQty validates fractional-PIECE quantities. This replaces the
 // listProducts → [] stub.
-import { Prisma, prisma, runTx, joinStrategy } from "../shared/db";
+import { Prisma, prisma, runTx, joinStrategy, type Tx } from "../shared/db";
 import { audit } from "../shared/audit";
-import { requirePermission, type Session } from "../shared/rbac";
+import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";
 import { toBaseQty } from "../shared/uom";
 import { fromPaise, toPaise } from "../shared/money";
 import type { Id } from "../shared/types";
+// Opening stock goes through the inventory kernel so it lands as a real signed
+// movement, never a silent ProductStock write. No import cycle: inventory/service
+// imports only shared/* + its own schema (the same direction import/service already
+// takes when it seeds CSV opening stock).
+import { incrementStock } from "../inventory/service";
+import { ensureDefaultMasters } from "./defaults";
 import {
   createProductSchema,
   updateProductSchema,
@@ -53,6 +59,8 @@ export interface ProductSummary {
   brand: string | null;
   categoryId: Id;
   hsnCode: string | null;
+  /** Scanned EAN/UPC or shop-printed label. Lets the till resolve a scan to an item. */
+  barcode: string | null;
   gstRatePct: string;
   baseUnit: { id: Id; code: string; name: string; kind: "MEASURED" | "PIECE" };
   priceInclusive: boolean;
@@ -116,6 +124,7 @@ function toSummary(p: ProductWith): ProductSummary {
     brand: p.brand?.name ?? null,
     categoryId: p.categoryId,
     hsnCode: p.hsnCode,
+    barcode: p.barcode,
     gstRatePct: p.gstRate.toString(),
     baseUnit: { id: p.baseUnit.id, code: p.baseUnit.code, name: p.baseUnit.name, kind: p.baseUnit.kind },
     priceInclusive: p.priceInclusive,
@@ -155,7 +164,10 @@ function decodeCursor(cursor: string | undefined): string | undefined {
  * Validate that every sale unit is unique and convert one input row to the Prisma
  * create payload. Throws DomainError("DUP_SALE_UNIT") on a repeated unitId.
  */
-function buildSaleUnitData(saleUnits: SaleUnitInput[]): Prisma.ProductSaleUnitCreateWithoutProductInput[] {
+function buildSaleUnitData(
+  saleUnits: SaleUnitInput[],
+  shopId: string,
+): Prisma.ProductSaleUnitCreateWithoutProductInput[] {
   const seen = new Set<string>();
   let defaults = 0;
   const data = saleUnits.map((su) => {
@@ -165,6 +177,7 @@ function buildSaleUnitData(saleUnits: SaleUnitInput[]): Prisma.ProductSaleUnitCr
     seen.add(su.unitId);
     if (su.isDefault) defaults += 1;
     return {
+      shopId,
       unit: { connect: { id: su.unitId } },
       factorToBase: new Prisma.Decimal(su.factorToBase),
       mrp: su.mrp === undefined || su.mrp === null ? null : fromPaise(su.mrp),
@@ -176,6 +189,55 @@ function buildSaleUnitData(saleUnits: SaleUnitInput[]): Prisma.ProductSaleUnitCr
   if (defaults > 1) throw new DomainError("Only one sale unit may be the default", "MULTI_DEFAULT");
   if (defaults === 0 && data[0]) data[0].isDefault = true;
   return data;
+}
+
+// ─────────────────── auto-SKU ───────────────────
+/** How many times a create retries when its AUTO-generated SKU loses a race. */
+const AUTO_SKU_ATTEMPTS = 5;
+
+/**
+ * Name → SKU prefix: alphanumerics only, upper-cased, at most 6 characters
+ * ("UltraTech PPC Cement" → "ULTRAT"). Falls back to "ITEM" when the name yields
+ * nothing usable (e.g. a Devanagari-only name). PURE — exported so the admin form can
+ * preview the SKU it is about to get.
+ */
+export function skuPrefix(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return cleaned.length > 0 ? cleaned.slice(0, 6) : "ITEM";
+}
+
+/**
+ * The next free `PREFIX-0001`-style SKU for this shop, so "add item" never asks the
+ * shopkeeper for a code (myBillBook parity). Scans the prefix's existing SKUs and
+ * takes the LOWEST unused sequence, so re-adding after an archive reuses the gap.
+ *
+ * Uniqueness is ultimately enforced by `@@unique([shopId, sku])`; two concurrent
+ * creates can still pick the same number, so `createProduct` retries on that P2002
+ * (see AUTO_SKU_ATTEMPTS). Runs on the caller's `tx`.
+ */
+export async function generateSku(tx: Tx, shopId: string, name: string): Promise<string> {
+  const prefix = skuPrefix(name);
+  const rows = await tx.product.findMany({
+    where: { shopId, sku: { startsWith: `${prefix}-` } },
+    select: { sku: true },
+  });
+  const taken = new Set<number>();
+  for (const r of rows) {
+    const seq = Number(r.sku.slice(prefix.length + 1));
+    if (Number.isInteger(seq) && seq > 0) taken.add(seq);
+  }
+  let next = 1;
+  while (taken.has(next)) next += 1;
+  return `${prefix}-${String(next).padStart(4, "0")}`;
+}
+
+/** True when this error is the (shopId, sku) unique violation — the auto-SKU race. */
+function isDuplicateSku(e: unknown): boolean {
+  return (
+    e instanceof Prisma.PrismaClientKnownRequestError &&
+    e.code === "P2002" &&
+    ((e.meta?.target as string[] | string | undefined)?.toString() ?? "").includes("sku")
+  );
 }
 
 // ─────────────────── reads ───────────────────
@@ -197,7 +259,7 @@ function buildSaleUnitData(saleUnits: SaleUnitInput[]): Prisma.ProductSaleUnitCr
  *    not the cursor key, so cursor pagination is DISABLED for those sorts (first page
  *    only); `relevance` keeps full cursor pagination unchanged.
  */
-export async function listProducts(query: ListProductsQuery = {}): Promise<ProductPage> {
+export async function listProducts(shopId: string, query: ListProductsQuery = {}): Promise<ProductPage> {
   const {
     q,
     category,
@@ -214,7 +276,7 @@ export async function listProducts(query: ListProductsQuery = {}): Promise<Produ
     limit,
   } = listProductsQuerySchema.parse(query);
 
-  const where: Prisma.ProductWhereInput = {};
+  const where: Prisma.ProductWhereInput = { shopId };
   if (!includeArchived) where.isActive = true;
   // Category: legacy `category` (id) and new `categoryId` both narrow to one category.
   if (category) where.categoryId = category;
@@ -238,6 +300,10 @@ export async function listProducts(query: ListProductsQuery = {}): Promise<Produ
       { name: { contains: q, mode: "insensitive" } },
       { sku: { contains: q, mode: "insensitive" } },
       { brand: { is: { name: { contains: q, mode: "insensitive" } } } },
+      // Barcode is matched EXACTLY, not by `contains` (19 §4): a scanner delivers the
+      // whole code, and a substring match on a 13-digit EAN would pull in unrelated
+      // items that merely share a run of digits.
+      { barcode: q },
     ];
   }
 
@@ -308,23 +374,39 @@ function sortByDefaultPrice(rows: ProductWith[], dir: 1 | -1): ProductWith[] {
 }
 
 /** Single product (admin detail). Returns null if missing. */
-export async function getProduct(id: Id): Promise<ProductDetail | null> {
-  const p = await prisma.product.findUnique({
+export async function getProduct(shopId: string, id: Id): Promise<ProductDetail | null> {
+  const p = await prisma.product.findFirst({
     ...(await joinStrategy()),
-    where: { id },
+    where: { id, shopId },
     include: productInclude,
   });
   return p ? toDetail(p) : null;
 }
 
 /** Storefront-safe single product (hides archived). Returns null if missing/archived. */
-export async function getPublicProduct(id: Id): Promise<ProductSummary | null> {
+export async function getPublicProduct(shopId: string, id: Id): Promise<ProductSummary | null> {
   const p = await prisma.product.findFirst({
     ...(await joinStrategy()),
-    where: { id, isActive: true },
+    where: { id, shopId, isActive: true },
     include: productInclude,
   });
   return p ? toSummary(p) : null;
+}
+
+/**
+ * The GST rate of the shop's most recently created product, as a plain string
+ * ("18"), or null when the catalog is empty. The quick-add form pre-fills its GST
+ * field with this so the rate is "remembered" between items — a shop usually sells
+ * one or two slabs, and re-picking 18% for every item is the kind of friction
+ * myBillBook does not have.
+ */
+export async function getLastUsedGstRate(shopId: string): Promise<string | null> {
+  const last = await prisma.product.findFirst({
+    where: { shopId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { gstRate: true },
+  });
+  return last ? last.gstRate.toString() : null;
 }
 
 // ─────────────────── mutations ───────────────────
@@ -341,54 +423,151 @@ function auditMeta(session: Session) {
 }
 
 /**
- * Create a product with a base unit + N sale units (each factorToBase + price +
- * MRP), HSN, GST rate, priceInclusive. One transaction; permission-guarded
- * (products.create) + audited. Creates the ProductStock aggregate row (onHand 0)
- * so the decrement kernel has a row to update (S3/S4). Duplicate SKU → the unique
- * constraint surfaces as DomainError("DUP_SKU").
+ * Create a product. One transaction; permission-guarded (products.create) + audited.
+ * Creates the ProductStock aggregate row (onHand 0) so the decrement kernel has a row
+ * to update (S3/S4). Duplicate SKU → DomainError("DUP_SKU").
+ *
+ * SIMPLE mode (myBillBook parity — name + price is enough) fills in everything the
+ * quick-add form does not ask for, IN THIS ORDER, inside the one transaction:
+ *   1. permission + shop (unchanged);
+ *   2. missing `categoryId` / `baseUnitId` → the shop's defaults, seeding the starter
+ *      masters on first use (./defaults ensureDefaultMasters);
+ *   3. missing `sku` → the next free `PREFIX-0001` for this shop (generateSku),
+ *      retried on the unique-constraint race;
+ *   4. empty `saleUnits` → ONE synthesised sale unit at the base unit, factor 1,
+ *      priced at the top-level `salePrice` (which becomes required in this mode);
+ *   5. `openingStock` (base units) → a real ADJUST_IN movement via the inventory
+ *      kernel, so on-hand is never written behind the movement ledger's back;
+ *   6. `wholesalePrice` + `wholesaleMinQty` → ONE PriceSlab on the default sale unit,
+ *      which the existing pricing resolver applies once a bill line crosses the qty.
+ *
+ * FULL mode (explicit sku/category/base unit + N sale units) is untouched: every old
+ * field is still accepted and behaves exactly as before.
  */
 export async function createProduct(input: CreateProductInput, ctx: MutationCtx): Promise<ProductDetail> {
   requirePermission(ctx.session, "products.create");
+  const shopId = requireShop(ctx.session);
   const data = createProductSchema.parse(input);
-  const saleUnitData = buildSaleUnitData(data.saleUnits);
 
-  try {
-    const created = await runTx(async (tx) => {
-      const product = await tx.product.create({
-        data: {
-          sku: data.sku,
-          name: data.name,
-          brandId: data.brandId ?? null,
-          categoryId: data.categoryId,
-          hsnCode: data.hsnCode ?? null,
-          baseUnitId: data.baseUnitId,
-          costPerBaseUnit: fromPaise(data.costPerBaseUnit),
-          gstRate: new Prisma.Decimal(data.gstRatePct),
-          priceInclusive: data.priceInclusive ?? false,
-          reorderLevel: data.reorderLevel ? new Prisma.Decimal(data.reorderLevel) : null,
-          trackExpiry: data.trackExpiry ?? false,
-          allowNegative: data.allowNegative ?? false,
-          availableOnline: data.availableOnline ?? true,
-          imageKeys: data.imageKeys ?? [],
-          saleUnits: { create: saleUnitData },
-          stock: { create: { onHand: new Prisma.Decimal(0), reserved: new Prisma.Decimal(0) } },
-        },
-        include: productInclude,
+  const autoSku = !data.sku;
+  const autoCategory = !data.categoryId;
+  const autoBaseUnit = !data.baseUnitId;
+  // Wholesale needs BOTH halves to mean anything; a lone one is ignored, never an
+  // error — the simple path stays forgiving (a slab with no qty, or a qty with no
+  // price, is not a rule anyone can bill against).
+  const wholesale =
+    data.wholesalePrice !== undefined && data.wholesaleMinQty !== undefined && Number(data.wholesaleMinQty) > 0
+      ? { minQty: data.wholesaleMinQty, pricePerSaleUnit: data.wholesalePrice }
+      : null;
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const created = await runTx(async (tx) => {
+        // (2) Back-fill the masters the quick-add form never shows.
+        const fallback = autoCategory || autoBaseUnit ? await ensureDefaultMasters(tx, shopId) : null;
+        const categoryId = data.categoryId ?? fallback!.defaultCategoryId;
+        const baseUnitId = data.baseUnitId ?? fallback!.defaultUnitId;
+
+        // (3) SKU — caller's, or the next free one for this shop.
+        const sku = data.sku ?? (await generateSku(tx, shopId, data.name));
+
+        // (4) SIMPLE mode: one sale unit == the base unit, at `salePrice`.
+        let saleUnits = data.saleUnits;
+        if (saleUnits.length === 0) {
+          if (data.salePrice === undefined) throw new DomainError("Enter a sale price.", "VALIDATION");
+          saleUnits = [{ unitId: baseUnitId, factorToBase: "1", salePrice: data.salePrice, isDefault: true }];
+        }
+        const saleUnitData = buildSaleUnitData(saleUnits, shopId);
+
+        const product = await tx.product.create({
+          data: {
+            shopId,
+            sku,
+            name: data.name,
+            brandId: data.brandId ?? null,
+            categoryId,
+            hsnCode: data.hsnCode ?? null,
+            barcode: data.barcode ?? null,
+            baseUnitId,
+            costPerBaseUnit: fromPaise(data.costPerBaseUnit),
+            gstRate: new Prisma.Decimal(data.gstRatePct),
+            priceInclusive: data.priceInclusive ?? false,
+            reorderLevel: data.reorderLevel ? new Prisma.Decimal(data.reorderLevel) : null,
+            trackExpiry: data.trackExpiry ?? false,
+            allowNegative: data.allowNegative ?? false,
+            availableOnline: data.availableOnline ?? true,
+            imageKeys: data.imageKeys ?? [],
+            saleUnits: { create: saleUnitData },
+            stock: { create: { shopId, onHand: new Prisma.Decimal(0), reserved: new Prisma.Decimal(0) } },
+          },
+          include: productInclude,
+        });
+
+        // (6) Wholesale rate = one bulk slab on the DEFAULT sale unit (productInclude
+        // orders isDefault first, and buildSaleUnitData guarantees exactly one default).
+        const defaultSaleUnit = product.saleUnits[0];
+        if (wholesale && defaultSaleUnit) {
+          await tx.priceSlab.create({
+            data: {
+              shopId,
+              saleUnitId: defaultSaleUnit.id,
+              minQty: new Prisma.Decimal(wholesale.minQty),
+              pricePerSaleUnit: fromPaise(wholesale.pricePerSaleUnit),
+            },
+          });
+        }
+
+        // (5) Opening stock, in BASE units, validated against the base unit's kind
+        // (a PIECE base unit rejects "1.5") and applied through the kernel.
+        const seedStock = data.openingStock !== undefined && Number(data.openingStock) > 0;
+        if (seedStock) {
+          const baseQty = validateQtyToBase(data.openingStock!, {
+            code: product.baseUnit.code,
+            kind: product.baseUnit.kind,
+            factorToBase: "1",
+          });
+          await incrementStock(tx, shopId, product.id, baseQty, "ADJUST_IN", {
+            refType: "ADJUSTMENT",
+            reason: "Opening stock",
+            actorStaffId: ctx.session.userId,
+          });
+        }
+
+        await audit(tx, {
+          ...auditMeta(ctx.session),
+          shopId,
+          permissionUsed: "products.create",
+          action: "products.create",
+          targetType: "Product",
+          targetId: product.id,
+          after: {
+            sku: product.sku,
+            name: product.name,
+            // What the server filled in for the shopkeeper (quick-add traceability).
+            autoSku,
+            autoCategory,
+            autoBaseUnit,
+            openingStock: seedStock ? data.openingStock : null,
+            wholesale: wholesale
+              ? { minQty: wholesale.minQty, pricePerSaleUnit: wholesale.pricePerSaleUnit }
+              : null,
+          },
+          requestId: ctx.requestId,
+        });
+
+        // The row loaded above still carries the pre-seed stock snapshot, so re-read
+        // once when we moved stock — otherwise availableBase would report 0.
+        return seedStock
+          ? tx.product.findUniqueOrThrow({ where: { id: product.id }, include: productInclude })
+          : product;
       });
-      await audit(tx, {
-        ...auditMeta(ctx.session),
-        permissionUsed: "products.create",
-        action: "products.create",
-        targetType: "Product",
-        targetId: product.id,
-        after: { sku: product.sku, name: product.name },
-        requestId: ctx.requestId,
-      });
-      return product;
-    });
-    return toDetail(created);
-  } catch (e) {
-    throw mapPrismaError(e);
+      return toDetail(created);
+    } catch (e) {
+      // Auto-SKU race: another create took the number we picked. The tx rolled back,
+      // so re-running re-scans and picks the next free one.
+      if (autoSku && attempt < AUTO_SKU_ATTEMPTS && isDuplicateSku(e)) continue;
+      throw mapPrismaError(e);
+    }
   }
 }
 
@@ -399,11 +578,12 @@ export async function updateProduct(
   ctx: MutationCtx,
 ): Promise<ProductDetail> {
   requirePermission(ctx.session, "products.update");
+  const shopId = requireShop(ctx.session);
   const data = updateProductSchema.parse(input);
 
   try {
     const updated = await runTx(async (tx) => {
-      const before = await tx.product.findUnique({ where: { id } });
+      const before = await tx.product.findFirst({ where: { id, shopId } });
       if (!before) throw new DomainError(`Product ${id} not found`, "NOT_FOUND");
       const product = await tx.product.update({
         where: { id },
@@ -412,6 +592,7 @@ export async function updateProduct(
           brandId: data.brandId === undefined ? undefined : data.brandId,
           categoryId: data.categoryId,
           hsnCode: data.hsnCode === undefined ? undefined : data.hsnCode,
+          barcode: data.barcode === undefined ? undefined : data.barcode,
           costPerBaseUnit: data.costPerBaseUnit === undefined ? undefined : fromPaise(data.costPerBaseUnit),
           gstRate: data.gstRatePct === undefined ? undefined : new Prisma.Decimal(data.gstRatePct),
           priceInclusive: data.priceInclusive,
@@ -430,6 +611,7 @@ export async function updateProduct(
       });
       await audit(tx, {
         ...auditMeta(ctx.session),
+        shopId,
         permissionUsed: "products.update",
         action: "products.update",
         targetType: "Product",
@@ -453,9 +635,10 @@ export async function updateProduct(
  */
 export async function archiveProduct(id: Id, ctx: MutationCtx): Promise<ProductDetail> {
   requirePermission(ctx.session, "products.archive");
+  const shopId = requireShop(ctx.session);
   try {
     const updated = await runTx(async (tx) => {
-      const before = await tx.product.findUnique({ where: { id } });
+      const before = await tx.product.findFirst({ where: { id, shopId } });
       if (!before) throw new DomainError(`Product ${id} not found`, "NOT_FOUND");
       const product = await tx.product.update({
         where: { id },
@@ -464,6 +647,7 @@ export async function archiveProduct(id: Id, ctx: MutationCtx): Promise<ProductD
       });
       await audit(tx, {
         ...auditMeta(ctx.session),
+        shopId,
         permissionUsed: "products.archive",
         action: "products.archive",
         targetType: "Product",
@@ -483,8 +667,11 @@ export async function archiveProduct(id: Id, ctx: MutationCtx): Promise<ProductD
 /** Restore an archived product (un-archive). products.archive permission. */
 export async function unarchiveProduct(id: Id, ctx: MutationCtx): Promise<ProductDetail> {
   requirePermission(ctx.session, "products.archive");
+  const shopId = requireShop(ctx.session);
   try {
     const updated = await runTx(async (tx) => {
+      const before = await tx.product.findFirst({ where: { id, shopId } });
+      if (!before) throw new DomainError(`Product ${id} not found`, "NOT_FOUND");
       const product = await tx.product.update({
         where: { id },
         data: { isActive: true },
@@ -492,6 +679,7 @@ export async function unarchiveProduct(id: Id, ctx: MutationCtx): Promise<Produc
       });
       await audit(tx, {
         ...auditMeta(ctx.session),
+        shopId,
         permissionUsed: "products.archive",
         action: "products.unarchive",
         targetType: "Product",
@@ -514,13 +702,15 @@ export async function addSaleUnit(
   ctx: MutationCtx,
 ): Promise<ProductDetail> {
   requirePermission(ctx.session, "products.update");
+  const shopId = requireShop(ctx.session);
   const data = saleUnitInputSchema.parse(input);
   try {
     const updated = await runTx(async (tx) => {
-      const product = await tx.product.findUnique({ where: { id: productId }, select: { id: true } });
+      const product = await tx.product.findFirst({ where: { id: productId, shopId }, select: { id: true } });
       if (!product) throw new DomainError(`Product ${productId} not found`, "NOT_FOUND");
       const su = await tx.productSaleUnit.create({
         data: {
+          shopId,
           productId,
           unitId: data.unitId,
           factorToBase: new Prisma.Decimal(data.factorToBase),
@@ -532,6 +722,7 @@ export async function addSaleUnit(
       });
       await audit(tx, {
         ...auditMeta(ctx.session),
+        shopId,
         permissionUsed: "products.update",
         action: "products.saleUnit.add",
         targetType: "ProductSaleUnit",
@@ -555,10 +746,11 @@ export async function editSaleUnit(
   ctx: MutationCtx,
 ): Promise<ProductDetail> {
   requirePermission(ctx.session, "products.update");
+  const shopId = requireShop(ctx.session);
   const data = editSaleUnitSchema.parse(input);
   try {
     const updated = await runTx(async (tx) => {
-      const before = await tx.productSaleUnit.findFirst({ where: { id: saleUnitId, productId } });
+      const before = await tx.productSaleUnit.findFirst({ where: { id: saleUnitId, productId, shopId } });
       if (!before) throw new DomainError(`Sale unit ${saleUnitId} not found`, "NOT_FOUND");
       await tx.productSaleUnit.update({
         where: { id: saleUnitId },
@@ -572,6 +764,7 @@ export async function editSaleUnit(
       });
       await audit(tx, {
         ...auditMeta(ctx.session),
+        shopId,
         permissionUsed: "products.update",
         action: "products.saleUnit.edit",
         targetType: "ProductSaleUnit",
@@ -597,8 +790,8 @@ export interface CategoryNode {
 }
 
 /** Full category tree (storefront-safe). */
-export async function listCategoryTree(): Promise<CategoryNode[]> {
-  const rows = await prisma.category.findMany({ orderBy: { name: "asc" } });
+export async function listCategoryTree(shopId: string): Promise<CategoryNode[]> {
+  const rows = await prisma.category.findMany({ where: { shopId }, orderBy: { name: "asc" } });
   const byId = new Map<string, CategoryNode>();
   for (const c of rows) byId.set(c.id, { id: c.id, name: c.name, parentId: c.parentId, children: [] });
   const roots: CategoryNode[] = [];
@@ -611,11 +804,13 @@ export async function listCategoryTree(): Promise<CategoryNode[]> {
 
 export async function createCategory(input: UpsertCategoryInput, ctx: MutationCtx): Promise<CategoryNode> {
   requirePermission(ctx.session, "products.create");
+  const shopId = requireShop(ctx.session);
   const data = upsertCategorySchema.parse(input);
   const created = await runTx(async (tx) => {
-    const c = await tx.category.create({ data: { name: data.name, parentId: data.parentId ?? null } });
+    const c = await tx.category.create({ data: { shopId, name: data.name, parentId: data.parentId ?? null } });
     await audit(tx, {
       ...auditMeta(ctx.session),
+      shopId,
       permissionUsed: "products.create",
       action: "category.create",
       targetType: "Category",
@@ -632,17 +827,19 @@ export interface BrandDTO {
   id: Id;
   name: string;
 }
-export async function listBrands(): Promise<BrandDTO[]> {
-  return prisma.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+export async function listBrands(shopId: string): Promise<BrandDTO[]> {
+  return prisma.brand.findMany({ where: { shopId }, orderBy: { name: "asc" }, select: { id: true, name: true } });
 }
 export async function createBrand(input: UpsertBrandInput, ctx: MutationCtx): Promise<BrandDTO> {
   requirePermission(ctx.session, "products.create");
+  const shopId = requireShop(ctx.session);
   const data = upsertBrandSchema.parse(input);
   try {
     const created = await runTx(async (tx) => {
-      const b = await tx.brand.create({ data: { name: data.name }, select: { id: true, name: true } });
+      const b = await tx.brand.create({ data: { shopId, name: data.name }, select: { id: true, name: true } });
       await audit(tx, {
         ...auditMeta(ctx.session),
+        shopId,
         permissionUsed: "products.create",
         action: "brand.create",
         targetType: "Brand",
@@ -665,23 +862,26 @@ export interface UnitDTO {
   kind: "MEASURED" | "PIECE";
 }
 /** Master unit list (base + sale unit defs) — 04 Units. */
-export async function listUnits(): Promise<UnitDTO[]> {
+export async function listUnits(shopId: string): Promise<UnitDTO[]> {
   return prisma.unit.findMany({
+    where: { shopId },
     orderBy: { code: "asc" },
     select: { id: true, code: true, name: true, kind: true },
   });
 }
 export async function createUnit(input: UpsertUnitInput, ctx: MutationCtx): Promise<UnitDTO> {
   requirePermission(ctx.session, "units.manage");
+  const shopId = requireShop(ctx.session);
   const data = upsertUnitSchema.parse(input);
   try {
     const created = await runTx(async (tx) => {
       const u = await tx.unit.create({
-        data: { code: data.code, name: data.name, kind: data.kind },
+        data: { shopId, code: data.code, name: data.name, kind: data.kind },
         select: { id: true, code: true, name: true, kind: true },
       });
       await audit(tx, {
         ...auditMeta(ctx.session),
+        shopId,
         permissionUsed: "units.manage",
         action: "unit.create",
         targetType: "Unit",

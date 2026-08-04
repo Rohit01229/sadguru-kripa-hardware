@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { runKhataReminders } from "@hardware/core";
+import { listActiveShops, runKhataReminders } from "@hardware/core";
 import { authorizeCron } from "../../../../lib/cron";
 import { sendKhataReminder } from "../../../../lib/notify";
 import { serverLogger, requestId } from "../../../../lib/logger";
@@ -17,9 +17,14 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: { code: "UNAUTHORIZED", message: auth.reason } }, { status: 401 });
   }
   try {
-    const result = await runKhataReminders(sendKhataReminder);
-    log.info("job khata-reminders", { overdue: result.overdue.length, reminded: result.reminded, requestId: rid });
-    return NextResponse.json({ ...result, authDeferred: auth.deferred });
+    // Per-shop reminders so each tenant's overdue list and sender branding stay separate (17).
+    const shops = await listActiveShops();
+    const perShop = [];
+    for (const shop of shops) {
+      perShop.push({ shopId: shop.id, ...(await runKhataReminders(shop.id, sendKhataReminder)) });
+    }
+    log.info("job khata-reminders", { shops: shops.length, requestId: rid });
+    return NextResponse.json({ shops: perShop, authDeferred: auth.deferred });
   } catch (e) {
     log.error("job khata-reminders failed", { err: String(e), requestId: rid });
     return NextResponse.json({ error: { code: "INTERNAL", message: "Retry." } }, { status: 500 });

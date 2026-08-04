@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listProducts, createProduct, listProductsQuerySchema, createProductSchema } from "@hardware/core";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, publicShopId } from "../../../lib/session";
 import { requestId } from "../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../lib/http";
 
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       limit: sp.get("limit") ? Number(sp.get("limit")) : undefined,
     };
     const query = listProductsQuerySchema.parse(raw);
-    const page = await listProducts(query);
+    const page = await listProducts(await publicShopId(), query);
     return NextResponse.json(page);
   } catch (e) {
     return errorResponse(e, rid);

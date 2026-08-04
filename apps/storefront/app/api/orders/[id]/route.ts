@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getMyOrder } from "@hardware/core";
-import { getCustomerSession } from "../../../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
 
@@ -15,8 +15,9 @@ export async function GET(
   try {
     const session = await getCustomerSession();
     if (!session || !session.customerId) return unauthenticated(rid);
+    const shopId = await storefrontShopId();
     const { id } = await params;
-    const order = await getMyOrder(session.customerId, id);
+    const order = await getMyOrder(shopId, session.customerId, id);
     if (!order) {
       return NextResponse.json(
         { error: { code: "NOT_FOUND", message: "Order not found.", requestId: rid } },

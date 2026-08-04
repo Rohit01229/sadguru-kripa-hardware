@@ -75,6 +75,7 @@ const ctx = {
   session: {
     userId: "owner_1",
     realm: "STAFF" as const,
+    shopId: "shop_test",
     roles: ["OWNER"],
     permissions: ["bill.kacha.create"],
   },

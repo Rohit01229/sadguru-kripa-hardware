@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { can, getStoreConfig, type Session } from "@hardware/core";
-import { getStaffSession } from "../../lib/session";
+import { getStaffSession, requireShopId } from "../../lib/session";
 import { logoutAction } from "./logout/actions";
 import { AdminShell, type NavItem } from "./AdminShell";
 
@@ -51,9 +51,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // Brand name from StoreConfig (Settings → Shop name); falls back to the seeded default.
   // Guarded: a StoreConfig read blip must degrade to the default, not throw out of the
   // shell layout and white-screen every admin page.
+  const shopId = await requireShopId();
   let storeName = "My Hardware Store";
   try {
-    const config = await getStoreConfig();
+    const config = await getStoreConfig(shopId);
     storeName = config?.name ?? "My Hardware Store";
   } catch {
     /* keep default */

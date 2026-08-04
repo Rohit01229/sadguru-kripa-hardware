@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getInvoice, requirePermission, DomainError } from "@hardware/core";
+import { getInvoice, requireShop, requirePermission, DomainError } from "@hardware/core";
 import { getStaffSession } from "../../../../../lib/session";
 import { requestId } from "../../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../../lib/http";
@@ -15,9 +15,10 @@ export async function GET(
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "bill.read");
+    const shopId = requireShop(session);
 
     const { id } = await params;
-    const invoice = await getInvoice(id);
+    const invoice = await getInvoice(shopId, id);
     if (!invoice) throw new DomainError(`Invoice ${id} not found`, "NOT_FOUND");
     return NextResponse.json(invoice);
   } catch (e) {

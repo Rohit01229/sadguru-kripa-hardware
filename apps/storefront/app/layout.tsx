@@ -10,7 +10,7 @@ import { getStoreConfig } from "@hardware/core";
 import { CartProvider } from "./cart/CartStore";
 import { Header } from "./Header";
 import { Footer } from "./Footer";
-import { getCustomerSession } from "../lib/session";
+import { getCustomerSession, storefrontShopId } from "../lib/session";
 import { logoutAction } from "./account/actions";
 
 // Title/brand come from the single StoreConfig row (no permission gate; safe for the
@@ -20,7 +20,8 @@ import { logoutAction } from "./account/actions";
 // root layout (which would white-screen the whole app, including the login page).
 const resolveStoreName = cache(async (): Promise<string> => {
   try {
-    const config = await getStoreConfig();
+    const shopId = await storefrontShopId();
+    const config = await getStoreConfig(shopId);
     return config?.name ?? "My Hardware Store";
   } catch {
     return "My Hardware Store";

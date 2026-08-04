@@ -224,26 +224,50 @@ const PRODUCTS: ProductSeed[] = [
 ];
 
 async function main(): Promise<void> {
-  // 1. Units (upsert by unique code).
+  // 0. Resolve the target shop (17 multi-tenant). Defaults to Shop #1 — same fixed
+  // id/slug as the primary seed (seed.ts) so the two stay consistent — or set
+  // DEMO_SHOP_SLUG to load this catalog into another (already-created) shop. Every
+  // write below is scoped to this shopId.
+  const demoSlug = process.env.DEMO_SHOP_SLUG ?? "shop-1";
+  const shop = await prisma.shop.upsert({
+    where: { slug: demoSlug },
+    update: {},
+    create:
+      demoSlug === "shop-1"
+        ? { id: "shop_0001", name: "My Hardware Store", slug: "shop-1" }
+        : { name: demoSlug, slug: demoSlug },
+  });
+  const shopId = shop.id;
+
+  // 1. Units (upsert by unique (shopId, code)).
   const unitByCode = new Map<string, string>();
   for (const u of UNITS) {
     const row = await prisma.unit.upsert({
-      where: { code: u.code },
+      where: { shopId_code: { shopId, code: u.code } },
       update: { name: u.name, kind: u.kind },
-      create: { code: u.code, name: u.name, kind: u.kind },
+      create: { shopId, code: u.code, name: u.name, kind: u.kind },
     });
     unitByCode.set(u.code, row.id);
   }
 
-  // 2. Categories (stable ids so re-runs don't duplicate; name isn't unique).
+  // 2. Categories (Category has no unique — id is a cuid, name isn't unique — so look
+  // up per shop by (shopId, name) and create if missing; re-runs reuse the found row.
+  // Map the demo key (c.id) → the real category id for the product upserts below.
+  const categoryIdByKey = new Map<string, string>();
   for (const c of CATEGORIES) {
-    await prisma.category.upsert({ where: { id: c.id }, update: { name: c.name }, create: c });
+    const existing = await prisma.category.findFirst({ where: { shopId, name: c.name } });
+    const row = existing ?? (await prisma.category.create({ data: { shopId, name: c.name } }));
+    categoryIdByKey.set(c.id, row.id);
   }
 
-  // 3. Brands (upsert by unique name).
+  // 3. Brands (upsert by unique (shopId, name)).
   const brandByName = new Map<string, string>();
   for (const name of BRANDS) {
-    const row = await prisma.brand.upsert({ where: { name }, update: {}, create: { name } });
+    const row = await prisma.brand.upsert({
+      where: { shopId_name: { shopId, name } },
+      update: {},
+      create: { shopId, name },
+    });
     brandByName.set(name, row.id);
   }
 
@@ -251,12 +275,14 @@ async function main(): Promise<void> {
   for (const p of PRODUCTS) {
     const baseUnitId = unitByCode.get(p.baseUnitCode);
     if (!baseUnitId) throw new Error(`Unknown base unit ${p.baseUnitCode} for ${p.sku}`);
+    const categoryId = categoryIdByKey.get(p.categoryId);
+    if (!categoryId) throw new Error(`Unknown category ${p.categoryId} for ${p.sku}`);
 
     const product = await prisma.product.upsert({
-      where: { sku: p.sku },
+      where: { shopId_sku: { shopId, sku: p.sku } },
       update: {
         name: p.name,
-        categoryId: p.categoryId,
+        categoryId,
         brandId: p.brand ? brandByName.get(p.brand) ?? null : null,
         hsnCode: p.hsnCode ?? null,
         baseUnitId,
@@ -268,9 +294,10 @@ async function main(): Promise<void> {
         isActive: true,
       },
       create: {
+        shopId,
         sku: p.sku,
         name: p.name,
-        categoryId: p.categoryId,
+        categoryId,
         brandId: p.brand ? brandByName.get(p.brand) ?? null : null,
         hsnCode: p.hsnCode ?? null,
         baseUnitId,
@@ -296,6 +323,7 @@ async function main(): Promise<void> {
           isDefault: su.isDefault ?? false,
         },
         create: {
+          shopId,
           productId: product.id,
           unitId,
           factorToBase: new Prisma.Decimal(su.factorToBase),
@@ -310,6 +338,7 @@ async function main(): Promise<void> {
       if (su.slabs?.length) {
         await prisma.priceSlab.createMany({
           data: su.slabs.map((s) => ({
+            shopId,
             saleUnitId: suRow.id,
             minQty: new Prisma.Decimal(s.minQty),
             pricePerSaleUnit: new Prisma.Decimal(s.pricePerSaleUnit),
@@ -322,7 +351,12 @@ async function main(): Promise<void> {
     await prisma.productStock.upsert({
       where: { productId: product.id },
       update: { onHand: new Prisma.Decimal(p.openingStock) },
-      create: { productId: product.id, onHand: new Prisma.Decimal(p.openingStock), reserved: new Prisma.Decimal(0) },
+      create: {
+        shopId,
+        productId: product.id,
+        onHand: new Prisma.Decimal(p.openingStock),
+        reserved: new Prisma.Decimal(0),
+      },
     });
   }
 

@@ -23,7 +23,7 @@ function recordCall(table: string, args: unknown[]) {
 
 function makeTx() {
   return {
-    customer: { findUnique: vi.fn(async () => ({ id: "cust_1" })) },
+    customer: { findFirst: vi.fn(async () => ({ id: "cust_1" })) },
     ledgerEntry: {
       create: vi.fn(async (args: unknown) => {
         recordCall("ledgerEntry.create", [args]);
@@ -69,7 +69,13 @@ vi.mock("../shared/db", async () => {
 import { post, recordPayment } from "./service";
 
 const ctx = {
-  session: { userId: "owner_1", realm: "STAFF" as const, roles: ["OWNER"], permissions: ["ledger.write"] },
+  session: {
+    userId: "owner_1",
+    realm: "STAFF" as const,
+    shopId: "shop_1",
+    roles: ["OWNER"],
+    permissions: ["ledger.write"],
+  },
   requestId: "req_1",
 };
 
@@ -87,21 +93,21 @@ describe("ledger.post — sign normalisation by entry type", () => {
   });
 
   it("stores a POSITIVE amount for INVOICE_DEBIT (increases what's owed)", async () => {
-    await post(tx as never, "cust_1", "INVOICE_DEBIT", 100);
+    await post(tx as never, "shop_1", "cust_1", "INVOICE_DEBIT", 100);
     const d = lastData("ledgerEntry.create");
     expect(d.type).toBe("INVOICE_DEBIT");
     expect(Number((d.amount as { toString(): string }).toString())).toBe(100);
   });
 
   it("stores a NEGATIVE amount for PAYMENT_CREDIT even when given a positive magnitude", async () => {
-    await post(tx as never, "cust_1", "PAYMENT_CREDIT", 250);
+    await post(tx as never, "shop_1", "cust_1", "PAYMENT_CREDIT", 250);
     const d = lastData("ledgerEntry.create");
     expect(d.type).toBe("PAYMENT_CREDIT");
     expect(Number((d.amount as { toString(): string }).toString())).toBe(-250);
   });
 
   it("stores a NEGATIVE amount for CREDIT_NOTE_CREDIT", async () => {
-    await post(tx as never, "cust_1", "CREDIT_NOTE_CREDIT", 75);
+    await post(tx as never, "shop_1", "cust_1", "CREDIT_NOTE_CREDIT", 75);
     const d = lastData("ledgerEntry.create");
     expect(Number((d.amount as { toString(): string }).toString())).toBe(-75);
   });

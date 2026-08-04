@@ -35,13 +35,21 @@ async function hashPassword(password: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  // 1. StoreConfig "default" (S0 skeleton) — unchanged on re-run.
+  // 0. Shop #1 — the tenant root (17). Fixed id/slug so re-runs are stable and match
+  // the data-migration's backfill target.
+  const shop = await prisma.shop.upsert({
+    where: { slug: "shop-1" },
+    update: {},
+    create: { id: "shop_0001", name: "My Hardware Store", slug: "shop-1" },
+  });
+
+  // 1. StoreConfig for this shop (now one row per shop, keyed by shopId) — no-op on re-run.
   const store = await prisma.storeConfig.upsert({
-    where: { id: "default" },
+    where: { shopId: shop.id },
     update: {},
     create: {
-      id: "default",
-      name: "My Hardware Store",
+      shopId: shop.id,
+      name: shop.name,
       homeState: "19", // 19 = West Bengal (placeholder home state; 03 §8)
     },
   });
@@ -75,6 +83,7 @@ async function main(): Promise<void> {
     existing ??
     (await prisma.staffUser.create({
       data: {
+        shopId: shop.id, // the owner belongs to Shop #1 (17)
         email: OWNER_EMAIL,
         name: "Owner",
         status: "ACTIVE",
@@ -82,6 +91,11 @@ async function main(): Promise<void> {
         passwordHash: await hashPassword(passwordPlain),
       },
     }));
+
+  // Backfill shopId on a pre-existing owner (e.g. seeded before multi-tenancy).
+  if (existing && !existing.shopId) {
+    await prisma.staffUser.update({ where: { id: existing.id }, data: { shopId: shop.id } });
+  }
 
   await prisma.userRole.upsert({
     where: { staffUserId_roleId: { staffUserId: ownerUser.id, roleId: owner.id } },

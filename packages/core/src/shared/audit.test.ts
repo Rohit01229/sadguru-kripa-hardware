@@ -9,6 +9,7 @@ describe("audit", () => {
     const tx = { auditLog: { create } } as unknown as Tx;
 
     const id = await audit(tx, {
+      shopId: "shop_test",
       actorStaffId: "u1",
       roleAtTime: "OWNER",
       permissionUsed: "bill.pakka.create",
@@ -22,6 +23,7 @@ describe("audit", () => {
     expect(id).toBe("a1");
     expect(create).toHaveBeenCalledTimes(1);
     const data = create.mock.calls[0]![0].data;
+    expect(data.shopId).toBe("shop_test");
     expect(data.action).toBe("bill.pakka.create");
     expect(data.permissionUsed).toBe("bill.pakka.create");
     expect(data.requestId).toBe("req-123");
@@ -31,7 +33,7 @@ describe("audit", () => {
     const create = vi.fn().mockResolvedValue({ id: "a2" });
     const tx = { auditLog: { create } } as unknown as Tx;
 
-    await audit(tx, { action: "stock.adjust" });
+    await audit(tx, { shopId: "shop_test", action: "stock.adjust" });
     const data = create.mock.calls[0]![0].data;
     expect(data.before).toBe(Prisma.JsonNull);
     expect(data.after).toBe(Prisma.JsonNull);

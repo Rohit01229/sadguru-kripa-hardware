@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { runBatchReconciliation } from "@hardware/core";
+import { listActiveShops, runBatchReconciliation } from "@hardware/core";
 import { authorizeCron } from "../../../../lib/cron";
 import { serverLogger, requestId } from "../../../../lib/logger";
 
@@ -17,9 +17,14 @@ async function handle(req: NextRequest): Promise<NextResponse> {
   }
   try {
     const repair = req.nextUrl.searchParams.get("repair") === "true";
-    const result = await runBatchReconciliation(repair);
-    log.info("job reconcile-batches", { drift: result.drift.length, reconciled: result.reconciled, repair, requestId: rid });
-    return NextResponse.json({ ...result, authDeferred: auth.deferred });
+    // Reconcile batch drift per shop (17); product→shop is immutable so no cross-tenant mixing.
+    const shops = await listActiveShops();
+    const perShop = [];
+    for (const shop of shops) {
+      perShop.push({ shopId: shop.id, ...(await runBatchReconciliation(shop.id, repair)) });
+    }
+    log.info("job reconcile-batches", { shops: shops.length, repair, requestId: rid });
+    return NextResponse.json({ shops: perShop, repair, authDeferred: auth.deferred });
   } catch (e) {
     log.error("job reconcile-batches failed", { err: String(e), requestId: rid });
     return NextResponse.json({ error: { code: "INTERNAL", message: "Retry." } }, { status: 500 });

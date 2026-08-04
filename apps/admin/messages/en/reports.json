@@ -4,7 +4,11 @@
     "dayEnd": "Day-end",
     "sales": "Sales",
     "gstr1": "GSTR-1",
-    "valuation": "Stock valuation"
+    "valuation": "Stock valuation",
+    "purchases": "Purchases",
+    "receivables": "Receivables",
+    "collections": "Collections",
+    "returns": "Returns"
   },
   "dayEnd": {
     "title": "Day-end summary",
@@ -111,5 +115,65 @@
   "gstr1Filter": {
     "period": "Period",
     "view": "View"
+  },
+  "purchases": {
+    "title": "Purchase report",
+    "description": "What you bought, from your goods receipts.",
+    "groupDay": "Day",
+    "groupSupplier": "Supplier",
+    "groupItem": "Item",
+    "statGrns": "Receipts",
+    "statValue": "Purchase value",
+    "colQty": "Qty received",
+    "colCount": "Count",
+    "colValue": "Value",
+    "emptyTitle": "No purchases in this period",
+    "emptyDescription": "Record a goods receipt in Stock → GRN and it will appear here."
+  },
+  "receivables": {
+    "title": "Receivables",
+    "description": "Who owes you money, as of {asOf}. Largest first.",
+    "statTotal": "Total outstanding",
+    "stat0to30": "0–30 days",
+    "stat31to60": "31–60 days",
+    "stat60plus": "60+ days",
+    "colParty": "Party",
+    "colPhone": "Phone",
+    "col0to30": "0–30 d",
+    "col31to60": "31–60 d",
+    "col60plus": "60+ d",
+    "colOutstanding": "Outstanding",
+    "showAll": "Show all parties, including those with nothing due",
+    "showDueOnly": "Show only parties with dues",
+    "emptyTitle": "Nothing outstanding",
+    "emptyDescription": "No party currently owes you money."
+  },
+  "collections": {
+    "title": "Collections",
+    "description": "Payments received over a period.",
+    "groupDay": "Day",
+    "groupMode": "Payment mode",
+    "statCount": "Payments",
+    "statTotal": "Collected",
+    "colCount": "Count",
+    "colAmount": "Amount",
+    "emptyTitle": "No payments in this period",
+    "emptyDescription": "Payments recorded against bills and khata will appear here."
+  },
+  "returns": {
+    "title": "Sales returns",
+    "description": "Credit notes raised over a period.",
+    "statCount": "Credit notes",
+    "statTax": "Tax reversed",
+    "statTotal": "Total returned",
+    "colNo": "Credit note",
+    "colDate": "Date",
+    "colInvoice": "Against bill",
+    "colParty": "Party",
+    "colReason": "Reason",
+    "colRefund": "Refund",
+    "colTotal": "Amount",
+    "emptyTitle": "No returns in this period",
+    "emptyDescription": "Credit notes raised against bills will appear here."
   }
 }

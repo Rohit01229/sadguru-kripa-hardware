@@ -13,7 +13,7 @@ import Decimal from "decimal.js";
 import { Prisma, prisma, runTx, type Tx } from "../shared/db";
 import { DomainError, InsufficientStock } from "../shared/errors";
 import { audit } from "../shared/audit";
-import { requirePermission, type Session } from "../shared/rbac";
+import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { toBaseQty } from "../shared/uom";
 import { fromPaise, toPaise } from "../shared/money";
 import { findIdempotent, hashRequest, storeIdempotent } from "../shared/idempotency";
@@ -69,6 +69,7 @@ export interface MovementRef {
  */
 export async function decrementStock(
   tx: Tx,
+  shopId: string,
   productId: string,
   baseQty: Decimal.Value,
   kind: MovementKind,
@@ -85,17 +86,18 @@ export async function decrementStock(
     ? await tx.$executeRaw`
         UPDATE "ProductStock"
         SET "onHand" = "onHand" - ${new Prisma.Decimal(q)}, "updatedAt" = now()
-        WHERE "productId" = ${productId}`
+        WHERE "productId" = ${productId} AND "shopId" = ${shopId}`
     : await tx.$executeRaw`
         UPDATE "ProductStock"
         SET "onHand" = "onHand" - ${new Prisma.Decimal(q)}, "updatedAt" = now()
-        WHERE "productId" = ${productId}
+        WHERE "productId" = ${productId} AND "shopId" = ${shopId}
           AND "onHand" - "reserved" >= ${new Prisma.Decimal(q)}`;
 
   if (updated === 0) throw new InsufficientStock(productId);
 
   const mv = await tx.stockMovement.create({
     data: {
+      shopId,
       productId,
       baseQty: new Prisma.Decimal(qty.negated().toFixed(3)), // signed − out
       kind,
@@ -119,6 +121,7 @@ export async function decrementStock(
  */
 export async function incrementStock(
   tx: Tx,
+  shopId: string,
   productId: string,
   baseQty: Decimal.Value,
   kind: MovementKind,
@@ -132,12 +135,13 @@ export async function incrementStock(
 
   await tx.productStock.upsert({
     where: { productId },
-    create: { productId, onHand: q, reserved: new Prisma.Decimal(0) },
+    create: { shopId, productId, onHand: q, reserved: new Prisma.Decimal(0) },
     update: { onHand: { increment: q } },
   });
 
   const mv = await tx.stockMovement.create({
     data: {
+      shopId,
       productId,
       baseQty: q, // signed + in
       kind,
@@ -161,6 +165,7 @@ export async function incrementStock(
  */
 export async function reserve(
   tx: Tx,
+  shopId: string,
   orderId: string,
   productId: string,
   baseQty: Decimal.Value,
@@ -175,13 +180,13 @@ export async function reserve(
   const updated = await tx.$executeRaw`
     UPDATE "ProductStock"
     SET "reserved" = "reserved" + ${q}, "updatedAt" = now()
-    WHERE "productId" = ${productId}
+    WHERE "productId" = ${productId} AND "shopId" = ${shopId}
       AND "onHand" - "reserved" >= ${q}`;
 
   if (updated === 0) throw new InsufficientStock(productId);
 
   const row = await tx.reservation.create({
-    data: { orderId, productId, baseQty: q, status: "ACTIVE", expiresAt },
+    data: { shopId, orderId, productId, baseQty: q, status: "ACTIVE", expiresAt },
     select: { id: true },
   });
   return row.id;
@@ -197,17 +202,29 @@ export interface ReleaseResult {
  * only ever acts on rows still ACTIVE, decrements ProductStock.reserved by each
  * row's qty, and flips the row to EXPIRED. Runs inside the caller's transaction.
  */
-export async function releaseExpired(tx: Tx, now: Date = new Date()): Promise<ReleaseResult> {
+export async function releaseExpired(
+  tx: Tx,
+  shopId: string | null,
+  now: Date = new Date(),
+): Promise<ReleaseResult> {
   const expired = await tx.reservation.findMany({
-    where: { status: "ACTIVE", expiresAt: { lt: now } },
+    // `shopId === null` = system-wide run (all shops); a non-null shopId scopes to one tenant.
+    where: { status: "ACTIVE", expiresAt: { lt: now }, ...(shopId ? { shopId } : {}) },
     select: { id: true, productId: true, baseQty: true },
   });
 
   for (const r of expired) {
-    await tx.$executeRaw`
-      UPDATE "ProductStock"
-      SET "reserved" = "reserved" - ${r.baseQty}, "updatedAt" = now()
-      WHERE "productId" = ${r.productId}`;
+    if (shopId) {
+      await tx.$executeRaw`
+        UPDATE "ProductStock"
+        SET "reserved" = "reserved" - ${r.baseQty}, "updatedAt" = now()
+        WHERE "productId" = ${r.productId} AND "shopId" = ${shopId}`;
+    } else {
+      await tx.$executeRaw`
+        UPDATE "ProductStock"
+        SET "reserved" = "reserved" - ${r.baseQty}, "updatedAt" = now()
+        WHERE "productId" = ${r.productId}`;
+    }
     await tx.reservation.update({ where: { id: r.id }, data: { status: "EXPIRED" } });
   }
 
@@ -247,9 +264,14 @@ interface SaleUnitConv {
  * Load a product's sale unit (for UoM conversion). Throws NOT_FOUND if the sale
  * unit does not belong to the product — guards against cross-product spoofing.
  */
-async function loadSaleUnit(tx: Tx, productId: string, saleUnitId: string): Promise<SaleUnitConv> {
+async function loadSaleUnit(
+  tx: Tx,
+  shopId: string,
+  productId: string,
+  saleUnitId: string,
+): Promise<SaleUnitConv> {
   const su = await tx.productSaleUnit.findFirst({
-    where: { id: saleUnitId, productId },
+    where: { id: saleUnitId, productId, shopId },
     select: { id: true, factorToBase: true, unit: { select: { code: true, kind: true } } },
   });
   if (!su) throw new DomainError(`Sale unit ${saleUnitId} not found for product ${productId}`, "NOT_FOUND");
@@ -309,12 +331,15 @@ export function negativeAllowed(productAllowNegative: boolean, requestAllowNegat
  */
 async function upsertBatchOnHand(
   tx: Tx,
+  shopId: string,
   productId: string,
   code: string | null | undefined,
   baseQtyDelta: Prisma.Decimal,
   meta: { mrp?: number | null; expiryDate?: string | null; mfgDate?: string | null } = {},
 ): Promise<string | null> {
   if (!code) return null;
+  // Batch's unique is @@unique([productId, code]) (parent implies shop — 17 §2c), so the
+  // composite lookup stays as-is; the create below still stamps shopId.
   const existing = await tx.batch.findUnique({
     where: { productId_code: { productId, code } },
     select: { id: true },
@@ -333,6 +358,7 @@ async function upsertBatchOnHand(
   }
   const created = await tx.batch.create({
     data: {
+      shopId,
       productId,
       code,
       onHand: baseQtyDelta,
@@ -374,6 +400,7 @@ export interface GrnDTO {
  */
 export async function recordGrn(input: RecordGrnInput, ctx: InventoryCtx): Promise<GrnDTO> {
   requirePermission(ctx.session, "stock.grn");
+  const shopId = requireShop(ctx.session);
   const data = recordGrnSchema.parse(input);
 
   const route = "POST /api/grn";
@@ -392,6 +419,7 @@ export async function recordGrn(input: RecordGrnInput, ctx: InventoryCtx): Promi
     return await runTx(async (tx) => {
       const grn = await tx.goodsReceipt.create({
         data: {
+          shopId,
           supplierId: data.supplierId ?? null,
           refNo: data.supplierInvoiceNo ?? null,
           date: data.receivedAt ? new Date(data.receivedAt) : new Date(),
@@ -405,7 +433,7 @@ export async function recordGrn(input: RecordGrnInput, ctx: InventoryCtx): Promi
       const movementIds: string[] = [];
 
       for (const line of data.lines) {
-        const su = await loadSaleUnit(tx, line.productId, line.receiveUnitId);
+        const su = await loadSaleUnit(tx, shopId, line.productId, line.receiveUnitId);
         // UoM conversion + per-base cost via the pure (unit-tested) helper.
         const { baseQty, costPerBase } = grnLineBaseAndCost(
           line.quantity,
@@ -413,14 +441,14 @@ export async function recordGrn(input: RecordGrnInput, ctx: InventoryCtx): Promi
           line.costPerReceiveUnit,
         );
 
-        const batchId = await upsertBatchOnHand(tx, line.productId, line.batchNo, baseQty, {
+        const batchId = await upsertBatchOnHand(tx, shopId, line.productId, line.batchNo, baseQty, {
           mrp: line.mrp,
           expiryDate: line.expiryDate,
           mfgDate: line.mfgDate,
         });
 
         // Atomic +stock and signed GRN_IN movement (kernel returns the movement id).
-        const movementId = await incrementStock(tx, line.productId, baseQty, "GRN_IN", {
+        const movementId = await incrementStock(tx, shopId, line.productId, baseQty, "GRN_IN", {
           refType: "GRN",
           refId: grn.id,
           actorStaffId: ctx.session.userId,
@@ -430,6 +458,7 @@ export async function recordGrn(input: RecordGrnInput, ctx: InventoryCtx): Promi
 
         await tx.grnLine.create({
           data: {
+            shopId,
             grnId: grn.id,
             productId: line.productId,
             batchId,
@@ -459,6 +488,7 @@ export async function recordGrn(input: RecordGrnInput, ctx: InventoryCtx): Promi
       };
 
       await audit(tx, {
+        shopId,
         ...auditMeta(ctx.session),
         permissionUsed: "stock.grn",
         action: "stock.grn",
@@ -544,21 +574,22 @@ function toMovementDTO(m: {
  */
 export async function adjustStock(input: AdjustStockInput, ctx: InventoryCtx): Promise<MovementDTO> {
   requirePermission(ctx.session, "stock.adjust");
+  const shopId = requireShop(ctx.session);
   const data = adjustStockSchema.parse(input);
 
   return await runTx(async (tx) => {
-    const product = await tx.product.findUnique({
-      where: { id: data.productId },
+    const product = await tx.product.findFirst({
+      where: { id: data.productId, shopId },
       select: { id: true, allowNegative: true },
     });
     if (!product) throw new DomainError(`Product ${data.productId} not found`, "NOT_FOUND");
-    const su = await loadSaleUnit(tx, data.productId, data.saleUnitId);
+    const su = await loadSaleUnit(tx, shopId, data.productId, data.saleUnitId);
     const baseQty = convertToBase(data.quantity, su);
 
     let movementId: string;
     if (data.direction === "IN") {
-      const batchId = await upsertBatchOnHand(tx, data.productId, data.batchNo, baseQty);
-      movementId = await incrementStock(tx, data.productId, baseQty, "ADJUST_IN", {
+      const batchId = await upsertBatchOnHand(tx, shopId, data.productId, data.batchNo, baseQty);
+      movementId = await incrementStock(tx, shopId, data.productId, baseQty, "ADJUST_IN", {
         refType: "ADJUSTMENT",
         reason: data.reason,
         actorStaffId: ctx.session.userId,
@@ -566,9 +597,10 @@ export async function adjustStock(input: AdjustStockInput, ctx: InventoryCtx): P
       });
     } else {
       const allowNeg = negativeAllowed(product.allowNegative, data.allowNegative);
-      const batchId = await upsertBatchOnHand(tx, data.productId, data.batchNo, baseQty.negated());
+      const batchId = await upsertBatchOnHand(tx, shopId, data.productId, data.batchNo, baseQty.negated());
       movementId = await decrementStock(
         tx,
+        shopId,
         data.productId,
         baseQty,
         "ADJUST_OUT",
@@ -577,9 +609,11 @@ export async function adjustStock(input: AdjustStockInput, ctx: InventoryCtx): P
       );
     }
 
+    // Own the id (just created in this tx) → by-id read-back is safe (17 §2).
     const mv = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
 
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "stock.adjust",
       action: "stock.adjust",
@@ -604,19 +638,20 @@ export async function adjustStock(input: AdjustStockInput, ctx: InventoryCtx): P
  */
 export async function setStockLevel(input: SetStockLevelInput, ctx: InventoryCtx): Promise<MovementDTO | null> {
   requirePermission(ctx.session, "stock.adjust");
+  const shopId = requireShop(ctx.session);
   const data = setStockLevelSchema.parse(input);
   const target = qty3(data.onHand);
   const reason = data.reason ?? "Manual stock edit";
 
   return await runTx(async (tx) => {
-    const product = await tx.product.findUnique({
-      where: { id: data.productId },
+    const product = await tx.product.findFirst({
+      where: { id: data.productId, shopId },
       select: { id: true },
     });
     if (!product) throw new DomainError(`Product ${data.productId} not found`, "NOT_FOUND");
 
-    const stock = await tx.productStock.findUnique({
-      where: { productId: data.productId },
+    const stock = await tx.productStock.findFirst({
+      where: { productId: data.productId, shopId },
       select: { onHand: true },
     });
     const current = new Decimal(stock ? stock.onHand.toString() : 0);
@@ -625,7 +660,7 @@ export async function setStockLevel(input: SetStockLevelInput, ctx: InventoryCtx
 
     let movementId: string;
     if (delta.isPositive()) {
-      movementId = await incrementStock(tx, data.productId, delta, "ADJUST_IN", {
+      movementId = await incrementStock(tx, shopId, data.productId, delta, "ADJUST_IN", {
         refType: "ADJUSTMENT",
         reason,
         actorStaffId: ctx.session.userId,
@@ -634,6 +669,7 @@ export async function setStockLevel(input: SetStockLevelInput, ctx: InventoryCtx
       // Absolute set: always apply, even below reserved (bypass the guard).
       movementId = await decrementStock(
         tx,
+        shopId,
         data.productId,
         delta.negated(),
         "ADJUST_OUT",
@@ -642,8 +678,10 @@ export async function setStockLevel(input: SetStockLevelInput, ctx: InventoryCtx
       );
     }
 
+    // Own the id (just created in this tx) → by-id read-back is safe (17 §2).
     const mv = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "stock.adjust",
       action: "stock.setLevel",
@@ -666,21 +704,22 @@ export async function setStockLevel(input: SetStockLevelInput, ctx: InventoryCtx
  */
 export async function recordReturn(input: RecordReturnInput, ctx: InventoryCtx): Promise<MovementDTO> {
   requirePermission(ctx.session, "stock.returns");
+  const shopId = requireShop(ctx.session);
   const data = recordReturnSchema.parse(input);
 
   return await runTx(async (tx) => {
-    const product = await tx.product.findUnique({
-      where: { id: data.productId },
+    const product = await tx.product.findFirst({
+      where: { id: data.productId, shopId },
       select: { id: true, allowNegative: true },
     });
     if (!product) throw new DomainError(`Product ${data.productId} not found`, "NOT_FOUND");
-    const su = await loadSaleUnit(tx, data.productId, data.saleUnitId);
+    const su = await loadSaleUnit(tx, shopId, data.productId, data.saleUnitId);
     const baseQty = convertToBase(data.quantity, su);
 
     let movementId: string;
     if (data.kind === "SALES") {
-      const batchId = await upsertBatchOnHand(tx, data.productId, data.batchNo, baseQty);
-      movementId = await incrementStock(tx, data.productId, baseQty, "SALES_RETURN_IN", {
+      const batchId = await upsertBatchOnHand(tx, shopId, data.productId, data.batchNo, baseQty);
+      movementId = await incrementStock(tx, shopId, data.productId, baseQty, "SALES_RETURN_IN", {
         refType: "RETURN",
         refId: data.refId ?? null,
         reason: data.reason,
@@ -689,9 +728,10 @@ export async function recordReturn(input: RecordReturnInput, ctx: InventoryCtx):
       });
     } else {
       const allowNeg = negativeAllowed(product.allowNegative, data.allowNegative);
-      const batchId = await upsertBatchOnHand(tx, data.productId, data.batchNo, baseQty.negated());
+      const batchId = await upsertBatchOnHand(tx, shopId, data.productId, data.batchNo, baseQty.negated());
       movementId = await decrementStock(
         tx,
+        shopId,
         data.productId,
         baseQty,
         "PURCHASE_RETURN_OUT",
@@ -700,9 +740,11 @@ export async function recordReturn(input: RecordReturnInput, ctx: InventoryCtx):
       );
     }
 
+    // Own the id (just created in this tx) → by-id read-back is safe (17 §2).
     const mv = await tx.stockMovement.findUniqueOrThrow({ where: { id: movementId } });
 
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "stock.returns",
       action: "stock.return",
@@ -760,11 +802,12 @@ export function isLowStock(onHand: Prisma.Decimal | string, reorderLevel: Prisma
  *  - q — name/sku match.
  * Read-only (stock.read enforced at transport).
  */
-export async function listStock(query: StockListQuery = {}): Promise<StockPage> {
+export async function listStock(shopId: string, query: StockListQuery = {}): Promise<StockPage> {
   const { q, lowOnly, lowStockOnly, categoryId, cursor, limit } = stockListQuerySchema.parse(query);
   const onlyLow = lowOnly || lowStockOnly === true;
 
-  const where: Prisma.ProductWhereInput = { isActive: true };
+  // shopId is shared by both the normal-listing findMany and the low-stock keyset-scan loop below.
+  const where: Prisma.ProductWhereInput = { isActive: true, shopId };
   if (categoryId) where.categoryId = categoryId;
   if (q && q.length > 0) {
     where.OR = [
@@ -859,10 +902,10 @@ export async function listStock(query: StockListQuery = {}): Promise<StockPage> 
 }
 
 /** Items at/below reorder level (low-stock alert source — 03 §10 job uses this). */
-export async function lowStock(limit = 200): Promise<StockRowDTO[]> {
+export async function lowStock(shopId: string, limit = 200): Promise<StockRowDTO[]> {
   // Clamp to the list query's max so a caller-supplied limit never trips Zod (this
   // is an internal alert source, not a wire query).
-  const page = await listStock({ lowOnly: true, limit: Math.min(Math.max(limit, 1), 200) });
+  const page = await listStock(shopId, { lowOnly: true, limit: Math.min(Math.max(limit, 1), 200) });
   return page.data;
 }
 
@@ -877,10 +920,10 @@ export interface MovementPage {
  * as an unattributed stock-out (03 §6). Filter by product / kind / date range
  * (all optional + additive); cursor-paginated by createdAt,id (DESC — newest first).
  */
-export async function listMovements(query: MovementsQuery = {}): Promise<MovementPage> {
+export async function listMovements(shopId: string, query: MovementsQuery = {}): Promise<MovementPage> {
   const { productId, kind, from, to, cursor, limit } = movementsQuerySchema.parse(query);
 
-  const where: Prisma.StockMovementWhereInput = {};
+  const where: Prisma.StockMovementWhereInput = { shopId };
   if (productId) where.productId = productId;
   if (kind) where.kind = kind;
   if (from || to) {
@@ -925,13 +968,13 @@ export interface NearExpiryDTO {
  * first (04 Stock; 03 §10 near-expiry job source). Includes already-expired
  * batches (daysToExpiry ≤ 0) so they surface for action.
  */
-export async function nearExpiry(query: NearExpiryQuery = {}): Promise<NearExpiryDTO[]> {
+export async function nearExpiry(shopId: string, query: NearExpiryQuery = {}): Promise<NearExpiryDTO[]> {
   const { withinDays } = nearExpiryQuerySchema.parse(query);
   const now = new Date();
   const cutoff = new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000);
 
   const rows = await prisma.batch.findMany({
-    where: { expiryDate: { not: null, lte: cutoff }, onHand: { gt: 0 } },
+    where: { shopId, expiryDate: { not: null, lte: cutoff }, onHand: { gt: 0 } },
     orderBy: { expiryDate: "asc" },
     select: {
       id: true,
@@ -993,22 +1036,24 @@ function toSupplierDTO(s: {
 }
 
 /** Supplier directory (suppliers.read enforced at transport). */
-export async function listSuppliers(): Promise<SupplierDTO[]> {
-  const rows = await prisma.supplier.findMany({ orderBy: { name: "asc" } });
+export async function listSuppliers(shopId: string): Promise<SupplierDTO[]> {
+  const rows = await prisma.supplier.findMany({ where: { shopId }, orderBy: { name: "asc" } });
   return rows.map(toSupplierDTO);
 }
 
-export async function getSupplier(id: Id): Promise<SupplierDTO | null> {
-  const s = await prisma.supplier.findUnique({ where: { id } });
+export async function getSupplier(shopId: string, id: Id): Promise<SupplierDTO | null> {
+  const s = await prisma.supplier.findFirst({ where: { id, shopId } });
   return s ? toSupplierDTO(s) : null;
 }
 
 export async function createSupplier(input: UpsertSupplierInput, ctx: InventoryCtx): Promise<SupplierDTO> {
   requirePermission(ctx.session, "suppliers.write");
+  const shopId = requireShop(ctx.session);
   const data = upsertSupplierSchema.parse(input);
   const created = await runTx(async (tx) => {
     const s = await tx.supplier.create({
       data: {
+        shopId,
         name: data.name,
         gstin: data.gstin ?? null,
         phone: data.phone ?? null,
@@ -1016,6 +1061,7 @@ export async function createSupplier(input: UpsertSupplierInput, ctx: InventoryC
       },
     });
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "suppliers.write",
       action: "supplier.create",
@@ -1031,9 +1077,11 @@ export async function createSupplier(input: UpsertSupplierInput, ctx: InventoryC
 
 export async function editSupplier(id: Id, input: EditSupplierInput, ctx: InventoryCtx): Promise<SupplierDTO> {
   requirePermission(ctx.session, "suppliers.write");
+  const shopId = requireShop(ctx.session);
   const data = editSupplierSchema.parse(input);
   const updated = await runTx(async (tx) => {
-    const before = await tx.supplier.findUnique({ where: { id } });
+    // Scope the initial load; the by-id update below is then safe (ownership proven — 17 §4).
+    const before = await tx.supplier.findFirst({ where: { id, shopId } });
     if (!before) throw new DomainError(`Supplier ${id} not found`, "NOT_FOUND");
     const s = await tx.supplier.update({
       where: { id },
@@ -1045,6 +1093,7 @@ export async function editSupplier(id: Id, input: EditSupplierInput, ctx: Invent
       },
     });
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "suppliers.write",
       action: "supplier.edit",
@@ -1060,9 +1109,9 @@ export async function editSupplier(id: Id, input: EditSupplierInput, ctx: Invent
 }
 
 /** Supplier dues / payments (nice-to-have [N]). POs are future — only payments listed. */
-export async function getSupplierDues(id: Id): Promise<SupplierDuesDTO> {
+export async function getSupplierDues(shopId: string, id: Id): Promise<SupplierDuesDTO> {
   const payments = await prisma.supplierPayment.findMany({
-    where: { supplierId: id },
+    where: { supplierId: id, shopId },
     orderBy: { date: "desc" },
   });
   const paidTotal = payments.reduce((acc, p) => acc + toPaise(p.amount), 0);

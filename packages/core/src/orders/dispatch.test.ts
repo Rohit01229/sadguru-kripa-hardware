@@ -27,9 +27,10 @@ function makeTx(PrismaDecimal: typeof DecimalModule.default) {
   let counter = 0;
   return {
     order: {
-      findUnique: vi.fn(async () => ({
+      findFirst: vi.fn(async () => ({
         id: "ord_1",
         orderNo: "ORD-X",
+        shopId: "shop_test",
         status: state.orderStatus,
         paymentStatus: state.paymentStatus,
         placeOfSupplyState: state.supplyState,
@@ -43,7 +44,6 @@ function makeTx(PrismaDecimal: typeof DecimalModule.default) {
         rec("order.update", data);
         return {};
       }),
-      findFirst: vi.fn(async () => null),
     },
     reservation: {
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -110,7 +110,7 @@ vi.mock("../shared/db", async () => {
   return {
     prisma: {
       order: {
-        findUnique: vi.fn(async () => ({
+        findFirst: vi.fn(async () => ({
           id: "ord_1",
           orderNo: "ORD-X",
           customerId: "cust_1",
@@ -128,7 +128,7 @@ vi.mock("../shared/db", async () => {
           reservations: [{ status: "CONVERTED", expiresAt: new Date() }],
         })),
       },
-      invoice: { findUnique: vi.fn(async () => ({ id: "inv_1", invoiceNo: "2026-27/000001" })) },
+      invoice: { findFirst: vi.fn(async () => ({ id: "inv_1", invoiceNo: "2026-27/000001" })) },
     },
     Prisma: { Decimal: PrismaDecimal },
     runTx: async (fn: (t: unknown) => Promise<unknown>) => fn(tx),
@@ -140,7 +140,7 @@ import { dispatchOrder } from "./service";
 import { DomainError } from "../shared/errors";
 
 const ctx = {
-  session: { userId: "owner_1", realm: "STAFF" as const, roles: ["OWNER"], permissions: ["orders.fulfil"] },
+  session: { userId: "owner_1", shopId: "shop_test", realm: "STAFF" as const, roles: ["OWNER"], permissions: ["orders.fulfil"] },
   requestId: "req_1",
 };
 
@@ -202,8 +202,10 @@ describe("orders.dispatchOrder — convert reservation + pakka-on-dispatch (03 �
     await dispatchOrder("ord_1", {}, ctx);
     const upd = calls["order.update"]!.find((u) => (u as { status?: string }).status === "DISPATCHED");
     expect(upd).toBeDefined();
-    const audit = calls["auditLog.create"]![0] as { action: string };
+    const audit = calls["auditLog.create"]![0] as { action: string; shopId: string };
     expect(audit.action).toBe("orders.dispatch");
+    // The audit row is stamped with the caller's shop (17 — multi-tenancy).
+    expect(audit.shopId).toBe("shop_test");
   });
 
   it("refuses to dispatch an order that is not PACKED (422 INVALID_TRANSITION)", async () => {

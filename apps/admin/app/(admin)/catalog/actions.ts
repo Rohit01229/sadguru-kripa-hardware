@@ -15,6 +15,7 @@ import {
   createUnit,
   listCategoryTree,
   listBrands,
+  requireShop,
   type CategoryNode,
   createProductSchema,
   saleUnitInputSchema,
@@ -74,6 +75,18 @@ async function ctx() {
 
 const boolFrom = (v: FormDataEntryValue | null) => v === "on" || v === "true" || v === "1";
 
+/**
+ * Money crosses the wire in paise (04 §2) but shopkeepers type rupees. Blank stays
+ * `undefined` so an untouched optional price is omitted rather than sent as 0 — the
+ * difference between "no wholesale rate" and "wholesale rate of ₹0".
+ */
+function rupeesToPaise(v: FormDataEntryValue | null): number | undefined {
+  const s = String(v ?? "").trim();
+  if (!s) return undefined;
+  const n = Number(s);
+  return Number.isFinite(n) ? Math.round(n * 100) : undefined;
+}
+
 /** Sentinel the product form submits when the operator picks "Other…" and types a new name. */
 const OTHER = "__other__";
 
@@ -89,16 +102,20 @@ function flattenCats(nodes: CategoryNode[], out: { id: string; name: string }[] 
  * Turn the category select into an id. When it's the "Other…" sentinel, match the
  * typed name against existing categories case-insensitively (so we don't spawn a
  * duplicate) and otherwise create it — then return the id the product create needs.
+ *
+ * Returns `undefined` for an empty selection so the core falls back to the shop's
+ * default ("General") category — Category is optional on the quick-add form (19 §2).
  */
 async function resolveCategoryId(
   selected: string,
   otherName: string,
   c: Awaited<ReturnType<typeof ctx>>,
-): Promise<string> {
-  if (selected !== OTHER) return selected;
+): Promise<string | undefined> {
+  if (selected !== OTHER) return selected || undefined;
   const name = otherName.trim();
   if (!name) throw new DomainError("Enter a category name.", "VALIDATION");
-  const existing = flattenCats(await listCategoryTree()).find(
+  const shopId = requireShop(c.session);
+  const existing = flattenCats(await listCategoryTree(shopId)).find(
     (x) => x.name.toLowerCase() === name.toLowerCase(),
   );
   if (existing) return existing.id;
@@ -114,7 +131,8 @@ async function resolveBrandId(
   if (selected !== OTHER) return selected || null;
   const name = otherName.trim();
   if (!name) throw new DomainError("Enter a brand name.", "VALIDATION");
-  const existing = (await listBrands()).find((b) => b.name.toLowerCase() === name.toLowerCase());
+  const shopId = requireShop(c.session);
+  const existing = (await listBrands(shopId)).find((b) => b.name.toLowerCase() === name.toLowerCase());
   if (existing) return existing.id;
   return (await createBrand({ name }, c)).id;
 }
@@ -155,14 +173,31 @@ export async function createProductAction(_prev: ActionState, form: FormData): P
       String(form.get("brandNameOther") ?? ""),
       c,
     );
+    // Quick-add ("Item") form vs. the full form share ONE action (19 §2). The quick
+    // form omits Item Code / Category / Unit entirely and sends a single Selling
+    // Price; the core back-fills those and synthesises the sale unit. When the
+    // shopkeeper also typed an MRP we must send an explicit sale-unit row, because
+    // the core's synthesised one carries price only.
+    const explicitRows = parseSaleUnits(form);
+    const sellingPrice = rupeesToPaise(form.get("salePrice"));
+    const mrp = rupeesToPaise(form.get("mrp"));
+    const baseUnitId = String(form.get("baseUnitId") ?? "") || undefined;
+    const saleUnits =
+      explicitRows.length > 0
+        ? explicitRows
+        : mrp !== undefined && sellingPrice !== undefined && baseUnitId
+          ? [{ unitId: baseUnitId, factorToBase: "1", salePrice: sellingPrice, mrp, isDefault: true }]
+          : [];
+
     const input = createProductSchema.parse({
-      sku: form.get("sku"),
+      sku: form.get("sku") || undefined, // blank → core generates the Item Code
       name: form.get("name"),
       brandId,
       categoryId,
       hsnCode: form.get("hsnCode") || null,
-      baseUnitId: form.get("baseUnitId"),
-      costPerBaseUnit: form.get("costPerBaseUnit") ? Math.round(Number(form.get("costPerBaseUnit")) * 100) : 0,
+      barcode: form.get("barcode") || null,
+      baseUnitId,
+      costPerBaseUnit: rupeesToPaise(form.get("costPerBaseUnit")) ?? 0,
       gstRatePct: String(form.get("gstRatePct") ?? "0"),
       priceInclusive: boolFrom(form.get("priceInclusive")),
       reorderLevel: form.get("reorderLevel") || null,
@@ -170,7 +205,11 @@ export async function createProductAction(_prev: ActionState, form: FormData): P
       allowNegative: boolFrom(form.get("allowNegative")),
       availableOnline: form.get("availableOnline") === null ? true : boolFrom(form.get("availableOnline")),
       imageKeys: form.getAll("imageKeys").map(String).filter((s) => s.length > 0),
-      saleUnits: parseSaleUnits(form),
+      salePrice: sellingPrice,
+      openingStock: form.get("openingStock") || undefined,
+      wholesalePrice: rupeesToPaise(form.get("wholesalePrice")),
+      wholesaleMinQty: form.get("wholesaleMinQty") || undefined,
+      saleUnits,
     });
     const product = await createProduct(input, c);
     revalidatePath("/catalog");

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getProfile, addAddress, upsertAddressSchema } from "@hardware/core";
-import { getCustomerSession } from "../../../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
 
@@ -10,7 +10,8 @@ export async function GET(): Promise<NextResponse> {
   try {
     const session = await getCustomerSession();
     if (!session || !session.customerId) return unauthenticated(rid);
-    const profile = await getProfile(session.customerId);
+    const shopId = await storefrontShopId();
+    const profile = await getProfile(shopId, session.customerId);
     return NextResponse.json(profile?.addresses ?? []);
   } catch (e) {
     return errorResponse(e, rid);
@@ -24,9 +25,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await getCustomerSession();
     if (!session || !session.customerId) return unauthenticated(rid);
+    const shopId = await storefrontShopId();
     const body = await req.json().catch(() => null);
     const input = upsertAddressSchema.parse(body);
-    const address = await addAddress(session.customerId, input);
+    const address = await addAddress(shopId, session.customerId, input);
     return NextResponse.json(address, { status: 201 });
   } catch (e) {
     return errorResponse(e, rid);

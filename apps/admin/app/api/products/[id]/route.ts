@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getProduct, getPublicProduct, updateProduct, updateProductSchema, DomainError } from "@hardware/core";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, publicShopId } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
 
@@ -16,7 +16,8 @@ export async function GET(
   try {
     const { id } = await params;
     const session = await getStaffSession();
-    const product = session ? await getProduct(id) : await getPublicProduct(id);
+    const shopId = await publicShopId();
+    const product = session ? await getProduct(shopId, id) : await getPublicProduct(shopId, id);
     if (!product) throw new DomainError(`Product ${id} not found`, "NOT_FOUND");
     return NextResponse.json(product);
   } catch (e) {

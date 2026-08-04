@@ -21,7 +21,7 @@ import Decimal from "decimal.js";
 import { Prisma, prisma, runTx, type Tx } from "../shared/db";
 import { DomainError, InsufficientStock } from "../shared/errors";
 import { audit } from "../shared/audit";
-import { requirePermission, type Session } from "../shared/rbac";
+import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { toBaseQty } from "../shared/uom";
 import { toPaise } from "../shared/money";
 import { findIdempotent, hashRequest, storeIdempotent } from "../shared/idempotency";
@@ -88,9 +88,9 @@ interface LineCatalog {
  * does not belong to the product (cross-product spoof guard) or the product is not
  * available online.
  */
-async function loadLine(tx: Tx, productId: string, saleUnitId: string): Promise<LineCatalog> {
+async function loadLine(tx: Tx, shopId: string, productId: string, saleUnitId: string): Promise<LineCatalog> {
   const su = await tx.productSaleUnit.findFirst({
-    where: { id: saleUnitId, productId },
+    where: { id: saleUnitId, productId, shopId },
     select: {
       factorToBase: true,
       salePrice: true,
@@ -252,12 +252,12 @@ const orderInclude = {
   reservations: { select: { status: true, expiresAt: true } },
 } satisfies Prisma.OrderInclude;
 
-/** Fetch an order + its generated invoice (1:1 via Invoice.orderId) and map to a DTO. */
-async function loadOrderDTO(id: string): Promise<OrderDTO | null> {
-  const o = await prisma.order.findUnique({ where: { id }, include: orderInclude });
+/** Fetch an order + its generated invoice (1:1 via Invoice.orderId) and map to a DTO. Shop-scoped (17). */
+async function loadOrderDTO(id: string, shopId: string): Promise<OrderDTO | null> {
+  const o = await prisma.order.findFirst({ where: { id, shopId }, include: orderInclude });
   if (!o) return null;
-  const inv = await prisma.invoice.findUnique({
-    where: { orderId: id },
+  const inv = await prisma.invoice.findFirst({
+    where: { orderId: id, shopId },
     select: { id: true, invoiceNo: true },
   });
   return toOrderDTO({ ...o, invoice: inv });
@@ -284,6 +284,7 @@ async function loadOrderDTO(id: string): Promise<OrderDTO | null> {
 export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise<OrderDTO> {
   requirePermission(ctx.session, "orders.place");
   const data = placeOrderSchema.parse(input);
+  const shopId = requireShop(ctx.session);
   const customerId = ctx.session.customerId;
   if (!customerId) throw new DomainError("No customer party on this session", "NOT_FOUND");
 
@@ -297,7 +298,7 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
   try {
     const created = await runTx(async (tx) => {
       const store = await tx.storeConfig.findUnique({
-        where: { id: "default" },
+        where: { shopId },
         select: {
           homeState: true,
           deliveryFlatFee: true,
@@ -315,7 +316,7 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
           throw new DomainError("A delivery address is required for delivery orders", "ADDRESS_REQUIRED");
         }
         const addr = await tx.address.findFirst({
-          where: { id: data.fulfilment.addressId, customerId },
+          where: { id: data.fulfilment.addressId, customerId, shopId },
           select: { id: true, state: true },
         });
         if (!addr) throw new DomainError("Delivery address not found", "NOT_FOUND");
@@ -330,6 +331,7 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
       // outer P2002 catch only when it is genuinely a numbering clash, not idempotency).
       const order = await tx.order.create({
         data: {
+          shopId,
           orderNo: generateOrderNo(),
           customerId,
           status: data.paymentMethod === "RAZORPAY" ? "PENDING_PAYMENT" : "PAY_LATER",
@@ -347,11 +349,11 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
       const loaded: LoadedLine[] = [];
       let itemTotal = new Decimal(0);
       for (const line of data.lines) {
-        const cat = await loadLine(tx, line.productId, line.saleUnitId);
+        const cat = await loadLine(tx, shopId, line.productId, line.saleUnitId);
         const baseQty = toBase(line.quantity, cat);
         // Atomic reserve with the availability guard (03 §5). Throws InsufficientStock
         // when the shared pool can't hold the qty → rolls the whole order back.
-        await reserveInline(tx, order.id, line.productId, baseQty, expiresAt);
+        await reserveInline(tx, shopId, order.id, line.productId, baseQty, expiresAt);
         const lineTotal = cat.salePrice.times(line.quantity);
         itemTotal = itemTotal.plus(lineTotal);
         loaded.push({
@@ -379,6 +381,7 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
           grandTotal: money2(grandTotal),
           lines: {
             create: loaded.map((l) => ({
+              shopId,
               productId: l.productId,
               saleUnitId: l.saleUnitId,
               saleQty: qty3(l.saleQty),
@@ -395,6 +398,7 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
       }
 
       await audit(tx, {
+        shopId,
         ...auditMeta(ctx.session),
         permissionUsed: "orders.place",
         action: "orders.place",
@@ -411,7 +415,7 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
         requestId: ctx.requestId,
       });
 
-      const dto = await loadOrderDTOTx(tx, order.id);
+      const dto = await loadOrderDTOTx(tx, order.id, shopId);
 
       if (ctx.idempotencyKey) {
         await storeIdempotent(tx, ctx.idempotencyKey, ctx.session.userId, route, requestHash, dto, 201);
@@ -441,6 +445,7 @@ export async function placeOrder(input: PlaceOrderInput, ctx: OrderCtx): Promise
  */
 async function reserveInline(
   tx: Tx,
+  shopId: string,
   orderId: string,
   productId: string,
   baseQty: Prisma.Decimal,
@@ -450,18 +455,19 @@ async function reserveInline(
     UPDATE "ProductStock"
     SET "reserved" = "reserved" + ${baseQty}, "updatedAt" = now()
     WHERE "productId" = ${productId}
+      AND "shopId" = ${shopId}
       AND "onHand" - "reserved" >= ${baseQty}`;
   if (updated === 0) throw new InsufficientStock(productId);
   await tx.reservation.create({
-    data: { orderId, productId, baseQty, status: "ACTIVE", expiresAt },
+    data: { shopId, orderId, productId, baseQty, status: "ACTIVE", expiresAt },
   });
 }
 
-/** loadOrderDTO inside a tx (reads the order + reservations; invoice not yet present). */
-async function loadOrderDTOTx(tx: Tx, id: string): Promise<OrderDTO> {
-  const o = await tx.order.findUnique({ where: { id }, include: orderInclude });
+/** loadOrderDTO inside a tx (reads the order + reservations; invoice not yet present). Shop-scoped (17). */
+async function loadOrderDTOTx(tx: Tx, id: string, shopId: string): Promise<OrderDTO> {
+  const o = await tx.order.findFirst({ where: { id, shopId }, include: orderInclude });
   if (!o) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
-  const inv = await tx.invoice.findUnique({ where: { orderId: id }, select: { id: true, invoiceNo: true } });
+  const inv = await tx.invoice.findFirst({ where: { orderId: id, shopId }, select: { id: true, invoiceNo: true } });
   return toOrderDTO({ ...o, invoice: inv });
 }
 
@@ -504,9 +510,12 @@ export async function markPaid(
       return { applied: false, orderId: null, status: null };
     }
 
+    // No session on the webhook path (03 §9): derive the tenant from the matched Order
+    // and stamp it on the Payment + audit rows (17 §6). The ProcessedWebhook INSERT
+    // above runs BEFORE this lookup, so its shopId stays null (nullable column).
     const order = await tx.order.findFirst({
       where: { razorpayOrderId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, shopId: true },
     });
     if (!order) {
       // Event recorded but no matching order (unknown/foreign order). Not an error —
@@ -525,6 +534,7 @@ export async function markPaid(
       status = updated.status;
       await tx.payment.create({
         data: {
+          shopId: order.shopId,
           orderId: order.id,
           mode: "CARD",
           amount: new Prisma.Decimal(0), // settled amount is recorded on the dispatch invoice
@@ -532,6 +542,7 @@ export async function markPaid(
         },
       });
       await audit(tx, {
+        shopId: order.shopId ?? "",
         actorStaffId: null,
         roleAtTime: null,
         permissionUsed: null,
@@ -558,9 +569,9 @@ function cuidish(): string {
 //  Fulfilment transitions (staff: orders.fulfil) + cancel (customer: .own)
 // ════════════════════════════════════════════════════════════════════════════
 
-/** Load the order or 404 (status only — the transition guards do the rest). */
-async function loadForFulfil(tx: Tx, id: string): Promise<{ status: OrderStatus }> {
-  const o = await tx.order.findUnique({ where: { id }, select: { status: true } });
+/** Load the order or 404 (status only — the transition guards do the rest). Shop-scoped (17). */
+async function loadForFulfil(tx: Tx, id: string, shopId: string): Promise<{ status: OrderStatus }> {
+  const o = await tx.order.findFirst({ where: { id, shopId }, select: { status: true } });
   if (!o) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
   return o;
 }
@@ -572,13 +583,15 @@ async function loadForFulfil(tx: Tx, id: string): Promise<{ status: OrderStatus 
  */
 export async function acceptOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
   requirePermission(ctx.session, "orders.fulfil");
+  const shopId = requireShop(ctx.session);
   await runTx(async (tx) => {
-    const o = await loadForFulfil(tx, id);
+    const o = await loadForFulfil(tx, id, shopId);
     if (o.status !== "PAY_LATER" && o.status !== "PENDING_PAYMENT" && o.status !== "CONFIRMED") {
       throw new DomainError(`Cannot accept an order in status ${o.status}`, "INVALID_TRANSITION");
     }
     await tx.order.update({ where: { id }, data: { status: "CONFIRMED" } });
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "orders.fulfil",
       action: "orders.accept",
@@ -589,7 +602,7 @@ export async function acceptOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
       requestId: ctx.requestId,
     });
   });
-  const dto = await loadOrderDTO(id);
+  const dto = await loadOrderDTO(id, shopId);
   if (!dto) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
   return dto;
 }
@@ -597,13 +610,15 @@ export async function acceptOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
 /** Owner packs a CONFIRMED order → PACKED. */
 export async function packOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
   requirePermission(ctx.session, "orders.fulfil");
+  const shopId = requireShop(ctx.session);
   await runTx(async (tx) => {
-    const o = await loadForFulfil(tx, id);
+    const o = await loadForFulfil(tx, id, shopId);
     if (o.status !== "CONFIRMED") {
       throw new DomainError(`Cannot pack an order in status ${o.status}`, "INVALID_TRANSITION");
     }
     await tx.order.update({ where: { id }, data: { status: "PACKED" } });
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "orders.fulfil",
       action: "orders.pack",
@@ -614,7 +629,7 @@ export async function packOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
       requestId: ctx.requestId,
     });
   });
-  const dto = await loadOrderDTO(id);
+  const dto = await loadOrderDTO(id, shopId);
   if (!dto) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
   return dto;
 }
@@ -643,11 +658,12 @@ export async function dispatchOrder(
   ctx: OrderCtx,
 ): Promise<DispatchResult> {
   requirePermission(ctx.session, "orders.fulfil");
+  const shopId = requireShop(ctx.session);
   const data = dispatchOrderSchema.parse(input);
 
   const invoice = await runTx(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id },
+    const order = await tx.order.findFirst({
+      where: { id, shopId },
       include: {
         lines: true,
         reservations: { where: { status: "ACTIVE" } },
@@ -674,13 +690,14 @@ export async function dispatchOrder(
         await tx.$executeRaw`
           UPDATE "ProductStock"
           SET "reserved" = "reserved" - ${r.baseQty}, "updatedAt" = now()
-          WHERE "productId" = ${r.productId}`;
+          WHERE "productId" = ${r.productId}
+            AND "shopId" = ${shopId}`;
         await tx.reservation.update({ where: { id: r.id }, data: { status: "CONVERTED" } });
       }
       // Final stock-out for the dispatched goods. allowNegative=true because the qty
       // was already held by an active reservation we just released — the availability
       // guard would otherwise see a transient state; the reservation guaranteed it.
-      await decrementStock(tx, line.productId, line.baseQty, "ORDER_DISPATCH_OUT", {
+      await decrementStock(tx, shopId, line.productId, line.baseQty, "ORDER_DISPATCH_OUT", {
         refType: "ORDER",
         refId: order.id,
         actorStaffId: ctx.session.userId,
@@ -691,12 +708,13 @@ export async function dispatchOrder(
     const paidOnline = order.paymentStatus === "PAID";
     const payment = paidOnline
       ? await tx.payment.findFirst({
-          where: { orderId: order.id, invoiceId: null },
+          where: { orderId: order.id, invoiceId: null, shopId },
           orderBy: { date: "desc" },
           select: { reference: true },
         })
       : null;
     const inv = await buildOrderInvoiceTx(tx, {
+      shopId,
       orderId: order.id,
       customerId: order.customer.id,
       customerName: order.customer.name,
@@ -718,6 +736,7 @@ export async function dispatchOrder(
     await tx.order.update({ where: { id: order.id }, data: { status: "DISPATCHED" } });
 
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "orders.fulfil",
       action: "orders.dispatch",
@@ -731,7 +750,7 @@ export async function dispatchOrder(
     return inv;
   });
 
-  const dto = await loadOrderDTO(id);
+  const dto = await loadOrderDTO(id, shopId);
   if (!dto) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
   return { order: dto, invoice };
 }
@@ -739,13 +758,15 @@ export async function dispatchOrder(
 /** Owner completes a DISPATCHED order → COMPLETED (delivered/handed over). */
 export async function completeOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
   requirePermission(ctx.session, "orders.fulfil");
+  const shopId = requireShop(ctx.session);
   await runTx(async (tx) => {
-    const o = await loadForFulfil(tx, id);
+    const o = await loadForFulfil(tx, id, shopId);
     if (o.status !== "DISPATCHED") {
       throw new DomainError(`Cannot complete an order in status ${o.status}`, "INVALID_TRANSITION");
     }
     await tx.order.update({ where: { id }, data: { status: "COMPLETED" } });
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "orders.fulfil",
       action: "orders.complete",
@@ -756,7 +777,7 @@ export async function completeOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
       requestId: ctx.requestId,
     });
   });
-  const dto = await loadOrderDTO(id);
+  const dto = await loadOrderDTO(id, shopId);
   if (!dto) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
   return dto;
 }
@@ -771,13 +792,14 @@ export async function completeOrder(id: Id, ctx: OrderCtx): Promise<OrderDTO> {
  */
 export async function cancelOrder(id: Id, input: CancelOrderInput, ctx: OrderCtx): Promise<OrderDTO> {
   requirePermission(ctx.session, "orders.cancel.own");
+  const shopId = requireShop(ctx.session);
   const data = cancelOrderSchema.parse(input);
   const customerId = ctx.session.customerId;
   if (!customerId) throw new DomainError("No customer party on this session", "NOT_FOUND");
 
   await runTx(async (tx) => {
     const order = await tx.order.findFirst({
-      where: { id, customerId }, // OWNERSHIP: scoped to the session's customer
+      where: { id, customerId, shopId }, // OWNERSHIP: scoped to the session's customer + shop
       include: { reservations: { where: { status: "ACTIVE" } } },
     });
     if (!order) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
@@ -793,7 +815,8 @@ export async function cancelOrder(id: Id, input: CancelOrderInput, ctx: OrderCtx
       await tx.$executeRaw`
         UPDATE "ProductStock"
         SET "reserved" = "reserved" - ${r.baseQty}, "updatedAt" = now()
-        WHERE "productId" = ${r.productId}`;
+        WHERE "productId" = ${r.productId}
+          AND "shopId" = ${shopId}`;
       await tx.reservation.update({ where: { id: r.id }, data: { status: "RELEASED" } });
     }
 
@@ -806,6 +829,7 @@ export async function cancelOrder(id: Id, input: CancelOrderInput, ctx: OrderCtx
     });
 
     await audit(tx, {
+      shopId,
       actorStaffId: null,
       roleAtTime: "CUSTOMER",
       permissionUsed: "orders.cancel.own",
@@ -818,14 +842,14 @@ export async function cancelOrder(id: Id, input: CancelOrderInput, ctx: OrderCtx
     });
   });
 
-  const dto = await loadOrderDTO(id);
+  const dto = await loadOrderDTO(id, shopId);
   if (!dto) throw new DomainError(`Order ${id} not found`, "NOT_FOUND");
   return dto;
 }
 
-/** Attach the Razorpay gateway order id to an order (set when the gateway order is created). */
-export async function attachRazorpayOrder(orderId: string, razorpayOrderId: string): Promise<void> {
-  await prisma.order.update({ where: { id: orderId }, data: { razorpayOrderId } });
+/** Attach the Razorpay gateway order id to an order (set when the gateway order is created). Shop-scoped (17). */
+export async function attachRazorpayOrder(shopId: string, orderId: string, razorpayOrderId: string): Promise<void> {
+  await prisma.order.updateMany({ where: { id: orderId, shopId }, data: { razorpayOrderId } });
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -848,9 +872,9 @@ function decodeCursor(cursor: string | undefined): string | undefined {
   }
 }
 
-async function listOrdersWhere(where: Prisma.OrderWhereInput, query: ListOrdersQuery): Promise<OrderPage> {
+async function listOrdersWhere(shopId: string, where: Prisma.OrderWhereInput, query: ListOrdersQuery): Promise<OrderPage> {
   const { status, from, to, cursor, limit } = listOrdersQuerySchema.parse(query);
-  const finalWhere: Prisma.OrderWhereInput = { ...where, ...(status ? { status } : {}) };
+  const finalWhere: Prisma.OrderWhereInput = { ...where, shopId, ...(status ? { status } : {}) };
   // Date range on order createdAt (additive — only applied when a bound is given).
   if (from || to) {
     finalWhere.createdAt = {};
@@ -870,7 +894,7 @@ async function listOrdersWhere(where: Prisma.OrderWhereInput, query: ListOrdersQ
   const ids = page.map((o) => o.id);
   const invoices = ids.length
     ? await prisma.invoice.findMany({
-        where: { orderId: { in: ids } },
+        where: { orderId: { in: ids }, shopId },
         select: { id: true, invoiceNo: true, orderId: true },
       })
     : [];
@@ -884,27 +908,27 @@ async function listOrdersWhere(where: Prisma.OrderWhereInput, query: ListOrdersQ
   };
 }
 
-/** Customer order history — OWNERSHIP-scoped to the session's customer (10 §5). */
-export async function listMyOrders(customerId: string, query: ListOrdersQuery = {}): Promise<OrderPage> {
-  return listOrdersWhere({ customerId }, query);
+/** Customer order history — OWNERSHIP-scoped to the session's customer + shop (10 §5, 17). */
+export async function listMyOrders(shopId: string, customerId: string, query: ListOrdersQuery = {}): Promise<OrderPage> {
+  return listOrdersWhere(shopId, { customerId }, query);
 }
 
-/** A single order for the customer — 404 if it is not theirs (ownership). */
-export async function getMyOrder(customerId: string, id: Id): Promise<OrderDTO | null> {
-  const o = await prisma.order.findFirst({ where: { id, customerId }, include: orderInclude });
+/** A single order for the customer — 404 if it is not theirs (ownership) or another shop's. */
+export async function getMyOrder(shopId: string, customerId: string, id: Id): Promise<OrderDTO | null> {
+  const o = await prisma.order.findFirst({ where: { id, customerId, shopId }, include: orderInclude });
   if (!o) return null;
-  const inv = await prisma.invoice.findUnique({ where: { orderId: id }, select: { id: true, invoiceNo: true } });
+  const inv = await prisma.invoice.findFirst({ where: { orderId: id, shopId }, select: { id: true, invoiceNo: true } });
   return toOrderDTO({ ...o, invoice: inv });
 }
 
-/** Admin order queue (staff orders.read) — all orders, filter by status. */
-export async function listOrdersAdmin(query: ListOrdersQuery = {}): Promise<OrderPage> {
-  return listOrdersWhere({}, query);
+/** Admin order queue (staff orders.read) — all orders in the caller's shop, filter by status. */
+export async function listOrdersAdmin(shopId: string, query: ListOrdersQuery = {}): Promise<OrderPage> {
+  return listOrdersWhere(shopId, {}, query);
 }
 
-/** A single order for staff fulfilment (no ownership scope). */
-export async function getOrderAdmin(id: Id): Promise<OrderDTO | null> {
-  return loadOrderDTO(id);
+/** A single order for staff fulfilment (shop-scoped; no customer-ownership scope). */
+export async function getOrderAdmin(shopId: string, id: Id): Promise<OrderDTO | null> {
+  return loadOrderDTO(id, shopId);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -925,10 +949,10 @@ export interface CartPriceDTO {
  * previews the place-of-supply tax kind from the chosen address. This is advisory:
  * the authoritative reserve + total happen atomically in placeOrder.
  */
-export async function priceCart(customerId: string, input: PriceCartInput): Promise<CartPriceDTO> {
+export async function priceCart(shopId: string, customerId: string, input: PriceCartInput): Promise<CartPriceDTO> {
   const data = priceCartSchema.parse(input);
   const store = await prisma.storeConfig.findUnique({
-    where: { id: "default" },
+    where: { shopId },
     select: { homeState: true, deliveryFlatFee: true, freeDeliveryThreshold: true },
   });
   if (!store) throw new DomainError("StoreConfig not initialised", "NOT_FOUND");
@@ -936,7 +960,7 @@ export async function priceCart(customerId: string, input: PriceCartInput): Prom
   let placeOfSupplyState = store.homeState;
   if (data.fulfilment === "DELIVERY" && data.addressId) {
     const addr = await prisma.address.findFirst({
-      where: { id: data.addressId, customerId },
+      where: { id: data.addressId, customerId, shopId },
       select: { state: true },
     });
     if (addr) placeOfSupplyState = addr.state;
@@ -949,7 +973,7 @@ export async function priceCart(customerId: string, input: PriceCartInput): Prom
   // filter (a mismatched pair must be rejected, not silently accepted).
   const saleUnitIds = [...new Set(data.items.map((l) => l.saleUnitId))];
   const sus = await prisma.productSaleUnit.findMany({
-    where: { id: { in: saleUnitIds } },
+    where: { id: { in: saleUnitIds }, shopId },
     select: {
       id: true,
       productId: true,
@@ -1033,10 +1057,10 @@ function toAddressDTO(a: {
   return { id: a.id, line1: a.line1, line2: a.line2, city: a.city, state: a.state, pincode: a.pincode, isDefault: a.isDefault };
 }
 
-/** Read the customer's profile + addresses (ownership: their own party only). */
-export async function getProfile(customerId: string): Promise<ProfileDTO | null> {
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+/** Read the customer's profile + addresses (ownership: their own party in their own shop). */
+export async function getProfile(shopId: string, customerId: string): Promise<ProfileDTO | null> {
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, shopId },
     include: { addresses: { orderBy: [{ isDefault: "desc" }, { id: "asc" }] }, account: { select: { email: true } } },
   });
   if (!customer || !customer.account) return null;
@@ -1050,29 +1074,31 @@ export async function getProfile(customerId: string): Promise<ProfileDTO | null>
   };
 }
 
-/** Update the customer's own profile (name/phone/GSTIN). */
-export async function updateProfile(customerId: string, input: UpdateProfileInput): Promise<ProfileDTO> {
+/** Update the customer's own profile (name/phone/GSTIN). Shop-scoped (17). */
+export async function updateProfile(shopId: string, customerId: string, input: UpdateProfileInput): Promise<ProfileDTO> {
   const data = updateProfileSchema.parse(input);
-  await prisma.customer.update({
-    where: { id: customerId },
+  const { count } = await prisma.customer.updateMany({
+    where: { id: customerId, shopId },
     data: { name: data.name, phone: data.phone ?? null, gstin: data.gstin ?? null },
   });
-  const dto = await getProfile(customerId);
+  if (count === 0) throw new DomainError(`Customer ${customerId} not found`, "NOT_FOUND");
+  const dto = await getProfile(shopId, customerId);
   if (!dto) throw new DomainError(`Customer ${customerId} not found`, "NOT_FOUND");
   return dto;
 }
 
-/** Add an address to the customer's own party. First address becomes default. */
-export async function addAddress(customerId: string, input: UpsertAddressInput): Promise<AddressDTO> {
+/** Add an address to the customer's own party. First address becomes default. Shop-scoped (17). */
+export async function addAddress(shopId: string, customerId: string, input: UpsertAddressInput): Promise<AddressDTO> {
   const data = upsertAddressSchema.parse(input);
   return runTx(async (tx) => {
-    const count = await tx.address.count({ where: { customerId } });
+    const count = await tx.address.count({ where: { customerId, shopId } });
     const isDefault = data.isDefault || count === 0;
     if (isDefault) {
-      await tx.address.updateMany({ where: { customerId }, data: { isDefault: false } });
+      await tx.address.updateMany({ where: { customerId, shopId }, data: { isDefault: false } });
     }
     const a = await tx.address.create({
       data: {
+        shopId,
         customerId,
         line1: data.line1,
         line2: data.line2 ?? null,
@@ -1086,11 +1112,11 @@ export async function addAddress(customerId: string, input: UpsertAddressInput):
   });
 }
 
-/** Delete one of the customer's own addresses (ownership-scoped). */
-export async function deleteAddress(customerId: string, addressId: string): Promise<void> {
-  const a = await prisma.address.findFirst({ where: { id: addressId, customerId }, select: { id: true } });
+/** Delete one of the customer's own addresses (ownership- + shop-scoped). */
+export async function deleteAddress(shopId: string, customerId: string, addressId: string): Promise<void> {
+  const a = await prisma.address.findFirst({ where: { id: addressId, customerId, shopId }, select: { id: true } });
   if (!a) throw new DomainError(`Address ${addressId} not found`, "NOT_FOUND");
-  await prisma.address.delete({ where: { id: addressId } });
+  await prisma.address.deleteMany({ where: { id: addressId, shopId } });
 }
 
 // Re-export the orders Zod surface + Razorpay primitives so transport imports

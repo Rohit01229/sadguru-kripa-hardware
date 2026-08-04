@@ -23,7 +23,7 @@ import {
   formatQty,
   formatDateTime,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { StockNav, Forbid } from "../nav";
 import { MovementsFilterBar } from "./MovementsFilterBar";
 
@@ -74,8 +74,9 @@ export default async function MovementsPage({
 
   const sp = await searchParams;
   const kind = isMovementKind(sp.kind) ? sp.kind : undefined;
+  const shopId = await requireShopId();
   const [page, product, productPage] = await Promise.all([
-    listMovements({
+    listMovements(shopId, {
       productId: sp.productId || undefined,
       kind,
       from: sp.from || undefined,
@@ -83,8 +84,8 @@ export default async function MovementsPage({
       cursor: sp.cursor || undefined,
       limit: 50,
     }),
-    sp.productId ? getProduct(sp.productId) : Promise.resolve(null),
-    listProducts({ limit: 200 }),
+    sp.productId ? getProduct(shopId, sp.productId) : Promise.resolve(null),
+    listProducts(shopId, { limit: 200 }),
   ]);
   const products = productPage.data;
 

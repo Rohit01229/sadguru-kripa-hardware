@@ -1,5 +1,6 @@
 import { Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
-import type { InvoiceDTO } from "@hardware/core";
+import type { InvoiceDTO, BillTheme } from "@hardware/core";
+import { DEFAULT_BILL_THEME, substituteTokens } from "@hardware/core";
 
 // Server-rendered A4 GST tax-invoice PDF (react-pdf — no Chromium, Vercel Hobby-safe).
 // Renders the SAME data as the on-screen invoice (InvoiceDTO, integer paise). Uses the
@@ -85,6 +86,15 @@ function placeOfSupply(code: string): string {
   return name ? `${code} — ${name}` : code;
 }
 
+// Theme accents, matching the on-screen renderer so preview == print == PDF.
+const PDF_ACCENT: Record<BillTheme["accent"], string> = {
+  espresso: "#4a2f1b",
+  amber: "#a1601a",
+  kraft: "#7a6a52",
+  ink: "#1f2937",
+  none: "#000000",
+};
+
 const INK = "#1f2937";
 const MUTE = "#6b7280";
 const LINE = "#d1d5db";
@@ -139,23 +149,36 @@ export function InvoiceDocument({
   invoice,
   store,
   lineNames,
+  theme,
 }: {
   invoice: InvoiceDTO;
   store: InvoicePdfStore;
   lineNames: Record<string, string>;
+  /** The shop's saved bill look (19 §7). The downloaded PDF must match what prints. */
+  theme?: BillTheme;
 }) {
   const igst = invoice.taxKind === "IGST";
+  const t = theme ?? DEFAULT_BILL_THEME;
+  const accent = PDF_ACCENT[t.accent];
+  // react-pdf ships only its standard families; map the theme's choice onto them and
+  // keep the bold variant paired, or headings silently lose their weight.
+  const face = t.fontFamily === "serif" ? "Times-Roman" : "Helvetica";
+  const faceBold = t.fontFamily === "serif" ? "Times-Bold" : "Helvetica-Bold";
+  const tagline = t.tagline
+    ? substituteTokens(t.tagline, { shopName: store.name, shopGstin: store.gstin })
+    : "";
   return (
     <Document title={`Invoice ${invoice.invoiceNo}`} author={store.name}>
-      <Page size="A4" style={s.page}>
+      <Page size="A4" style={[s.page, { fontFamily: face, fontSize: t.baseSizePt - 1.5 }]}>
         <View style={s.frame}>
-          <Text style={s.title}>TAX INVOICE</Text>
+          <Text style={[s.title, { color: accent, borderBottomColor: accent, fontFamily: faceBold }]}>TAX INVOICE</Text>
 
           {/* Supplier + invoice meta */}
           <View style={s.headRow}>
             <View style={s.headLeft}>
-              <Text style={s.shopName}>{store.name}</Text>
-              {store.address ? <Text style={{ color: MUTE, marginTop: 2 }}>{store.address}</Text> : null}
+              <Text style={[s.shopName, { color: accent, fontFamily: faceBold }]}>{store.name}</Text>
+              {tagline ? <Text style={{ color: MUTE, marginTop: 1 }}>{tagline}</Text> : null}
+              {t.showAddress && store.address ? <Text style={{ color: MUTE, marginTop: 2 }}>{store.address}</Text> : null}
               {store.gstin ? <Text style={{ marginTop: 2 }}>GSTIN: <Text style={s.bold}>{store.gstin}</Text></Text> : null}
             </View>
             <View style={s.headRight}>
@@ -241,15 +264,15 @@ export function InvoiceDocument({
           </View>
 
           {/* Bank + terms */}
-          {store.bankDetails || store.invoiceTerms ? (
+          {(t.showBankDetails && store.bankDetails) || (t.showTerms && store.invoiceTerms) ? (
             <View style={s.words}>
-              {store.bankDetails ? (
-                <View style={{ marginBottom: store.invoiceTerms ? 4 : 0 }}>
+              {t.showBankDetails && store.bankDetails ? (
+                <View style={{ marginBottom: t.showTerms && store.invoiceTerms ? 4 : 0 }}>
                   <Text style={s.sectionLabel}>Bank Details</Text>
                   <Text>{store.bankDetails}</Text>
                 </View>
               ) : null}
-              {store.invoiceTerms ? (
+              {t.showTerms && store.invoiceTerms ? (
                 <View>
                   <Text style={s.sectionLabel}>Terms &amp; Conditions</Text>
                   <Text>{store.invoiceTerms}</Text>
@@ -265,7 +288,7 @@ export function InvoiceDocument({
             </View>
             <View style={s.footRight}>
               <Text style={s.bold}>For {store.name}</Text>
-              <Text style={s.sign}>Authorised Signatory</Text>
+              <Text style={s.sign}>{substituteTokens(t.signatureLabel, { shopName: store.name })}</Text>
             </View>
           </View>
         </View>

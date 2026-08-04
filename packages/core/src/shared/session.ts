@@ -19,6 +19,7 @@ export async function resolveSession(staffUserId: string): Promise<Session | nul
     select: {
       id: true,
       status: true,
+      shopId: true,
       roles: {
         select: {
           role: {
@@ -46,6 +47,10 @@ export async function resolveSession(staffUserId: string): Promise<Session | nul
   return {
     userId: user.id,
     realm: "STAFF",
+    // The tenant this staff user belongs to (17). Backfilled to Shop #1 for existing
+    // users; `undefined` only if a user predates a shop, in which case requireShop
+    // refuses any business action rather than silently running unscoped.
+    shopId: user.shopId ?? undefined,
     roles: roleKeys,
     permissions: [...permissions],
   };
@@ -79,12 +84,14 @@ export const CUSTOMER_PERMISSIONS = [
 export async function resolveCustomerSession(accountId: string): Promise<Session | null> {
   const account = await prisma.customerAccount.findUnique({
     where: { id: accountId },
-    select: { id: true, customerId: true, emailVerified: true },
+    select: { id: true, customerId: true, emailVerified: true, customer: { select: { shopId: true } } },
   });
   if (!account || !account.emailVerified) return null;
   return {
     userId: account.id,
     customerId: account.customerId,
+    // A customer belongs to the shop whose storefront they registered on (17).
+    shopId: account.customer?.shopId ?? undefined,
     realm: "CUSTOMER",
     roles: ["CUSTOMER"],
     permissions: [...CUSTOMER_PERMISSIONS],

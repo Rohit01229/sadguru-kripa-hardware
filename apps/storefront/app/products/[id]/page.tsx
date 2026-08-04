@@ -5,6 +5,7 @@ import { getPublicProduct } from "@hardware/core";
 import { Badge, Card, formatMoney, formatQty } from "@hardware/ui";
 import { AddToCart } from "./AddToCart";
 import { ProductGallery } from "./ProductGallery";
+import { storefrontShopId } from "../../../lib/session";
 
 // Public product detail (S2 + S3 live stock): storefront-safe fields + sale-unit
 // options + LIVE available stock (available = onHand − reserved, from
@@ -13,7 +14,8 @@ import { ProductGallery } from "./ProductGallery";
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const t = await getTranslations("catalog");
-  const product = await getPublicProduct(id);
+  const shopId = await storefrontShopId();
+  const product = await getPublicProduct(shopId, id);
   if (!product) notFound();
 
   const available = Number(product.availableBase);

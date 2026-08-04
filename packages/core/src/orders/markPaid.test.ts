@@ -22,7 +22,7 @@ function makeTx() {
       return state.insertAffected;
     }),
     order: {
-      findFirst: vi.fn(async () => ({ id: "ord_1", status: state.orderStatus })),
+      findFirst: vi.fn(async () => ({ id: "ord_1", status: state.orderStatus, shopId: "shop_test" })),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         rec("order.update", data);
         return { status: data.status ?? state.orderStatus };
@@ -73,7 +73,12 @@ describe("orders.markPaid — webhook idempotency (03 §9)", () => {
     expect(upd.status).toBe("CONFIRMED");
     expect(upd.paymentStatus).toBe("PAID");
     expect(calls["payment.create"]).toHaveLength(1);
+    // Webhook has no session (03 §9): shopId is derived from the matched order (17 §6).
+    const pay = calls["payment.create"]![0] as { shopId: string };
+    expect(pay.shopId).toBe("shop_test");
     expect(calls["auditLog.create"]).toHaveLength(1);
+    const audit = calls["auditLog.create"]![0] as { shopId: string };
+    expect(audit.shopId).toBe("shop_test");
   });
 
   it("redelivery (event id conflict, 0 rows inserted): SAFE NO-OP — no state change at all", async () => {

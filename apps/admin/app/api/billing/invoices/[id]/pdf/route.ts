@@ -1,6 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { getInvoice, getStoreConfig, getProduct, requirePermission, DomainError } from "@hardware/core";
+import {
+  getInvoice,
+  getStoreConfig,
+  getProduct,
+  getBillTheme,
+  requireShop,
+  requirePermission,
+  DomainError,
+} from "@hardware/core";
 import { getStaffSession } from "../../../../../../lib/session";
 import { requestId } from "../../../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../../../lib/http";
@@ -21,14 +29,19 @@ export async function GET(
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "bill.read");
+    const shopId = requireShop(session);
 
     const { id } = await params;
-    const [invoice, store] = await Promise.all([getInvoice(id), getStoreConfig()]);
+    const [invoice, store, theme] = await Promise.all([
+      getInvoice(shopId, id),
+      getStoreConfig(shopId),
+      getBillTheme(shopId),
+    ]);
     if (!invoice) throw new DomainError(`Invoice ${id} not found`, "NOT_FOUND");
 
     // Resolve human item/unit names (the DTO carries only ids), same as the detail page.
     const productIds = [...new Set(invoice.lines.map((l) => l.productId))];
-    const products = await Promise.all(productIds.map((pid) => getProduct(pid)));
+    const products = await Promise.all(productIds.map((pid) => getProduct(shopId, pid)));
     const pmap = new Map(products.filter(Boolean).map((p) => [p!.id, p!]));
     const lineNames: Record<string, string> = {};
     for (const l of invoice.lines) {
@@ -52,6 +65,7 @@ export async function GET(
           invoiceTerms: store?.invoiceTerms ?? null,
         },
         lineNames,
+        theme,
       }),
     );
 

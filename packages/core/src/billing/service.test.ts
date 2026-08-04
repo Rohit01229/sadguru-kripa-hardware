@@ -29,24 +29,27 @@ function counterTx() {
 describe("billing.nextInvoiceNo — gapless numbering", () => {
   it("formats <FY>/<6-digit> from the counter the UPDATE returns", async () => {
     const { tx } = counterTx();
-    const r = await nextInvoiceNo(tx, "2026-27");
+    const r = await nextInvoiceNo(tx, "shop_test", "2026-27");
     expect(r.seq).toBe(1);
     expect(r.invoiceNo).toBe("2026-27/000001");
   });
 
-  it("ensures the FY counter row exists (upsert) before incrementing", async () => {
+  it("ensures the (shop, FY) counter row exists (upsert) before incrementing", async () => {
     const { tx, upsert } = counterTx();
-    await nextInvoiceNo(tx, "2026-27");
+    await nextInvoiceNo(tx, "shop_test", "2026-27");
     expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { fy: "2026-27" }, create: { fy: "2026-27", lastNo: 0 } }),
+      expect.objectContaining({
+        where: { shopId_fy: { shopId: "shop_test", fy: "2026-27" } },
+        create: { shopId: "shop_test", fy: "2026-27", lastNo: 0 },
+      }),
     );
   });
 
   it("produces consecutive, gapless numbers across sequential allocations", async () => {
     const { tx } = counterTx();
-    const a = await nextInvoiceNo(tx, "2026-27");
-    const b = await nextInvoiceNo(tx, "2026-27");
-    const c = await nextInvoiceNo(tx, "2026-27");
+    const a = await nextInvoiceNo(tx, "shop_test", "2026-27");
+    const b = await nextInvoiceNo(tx, "shop_test", "2026-27");
+    const c = await nextInvoiceNo(tx, "shop_test", "2026-27");
     expect([a.invoiceNo, b.invoiceNo, c.invoiceNo]).toEqual([
       "2026-27/000001",
       "2026-27/000002",
@@ -60,7 +63,7 @@ describe("billing.nextInvoiceNo — gapless numbering", () => {
 describe("billing.nextCreditNoteNo — independent gapless series", () => {
   it("allocates from its own counter, formatted the same way", async () => {
     const { tx } = counterTx();
-    const r = await nextCreditNoteNo(tx, "2026-27");
+    const r = await nextCreditNoteNo(tx, "shop_test", "2026-27");
     expect(r.seq).toBe(1);
     expect(r.creditNoteNo).toBe("2026-27/000001");
   });

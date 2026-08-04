@@ -7,6 +7,7 @@ import {
   clientIp,
 } from "@hardware/auth";
 import { serverLogger } from "../../../../lib/logger";
+import { storefrontShopId } from "../../../../lib/session";
 
 // POST /api/customer/register (04 §6) — storefront sign-up. Zod-validate,
 // rate-limit per-IP, create the account (unverified) + issue an email-verify
@@ -47,7 +48,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const { verifyToken } = await registerCustomer(parsed.data);
+    // Attach the new customer to the shop whose storefront they signed up on (17).
+    const shopId = await storefrontShopId();
+    const { verifyToken } = await registerCustomer({ ...parsed.data, shopId });
     // TODO(S6): email the verification link via Resend. For now log (redacted) so
     // dev can grab the token from the server console.
     log.info("customer registered; verification token issued", {

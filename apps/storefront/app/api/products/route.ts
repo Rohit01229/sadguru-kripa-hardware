@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { listProducts, listProductsQuerySchema } from "@hardware/core";
 import { requestId } from "../../../lib/logger";
 import { errorResponse } from "../../../lib/http";
+import { storefrontShopId } from "../../../lib/session";
 
 // GET /api/products (route, 🌐) — public storefront list/search + filtering. All
 // filtering/sort is server-side (URL params -> core query -> SQL). Storefront-safe
@@ -10,6 +11,7 @@ import { errorResponse } from "../../../lib/http";
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const rid = await requestId();
   try {
+    const shopId = await storefrontShopId();
     const sp = req.nextUrl.searchParams;
     const numParam = (key: string): number | undefined => {
       const raw = sp.get(key);
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       cursor: sp.get("cursor") ?? undefined,
       limit: sp.get("limit") ? Number(sp.get("limit")) : undefined,
     });
-    return NextResponse.json(await listProducts(query));
+    return NextResponse.json(await listProducts(shopId, query));
   } catch (e) {
     return errorResponse(e, rid);
   }

@@ -26,7 +26,7 @@ import {
   formatMoney,
   formatQty,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { PriceSlabEditor } from "./PriceSlabEditor";
 import { AddSaleUnitForm, ArchiveButton } from "./ProductActions";
 import { ProductImagesCard } from "./ProductImagesCard";
@@ -52,14 +52,15 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
   const t = await getTranslations("catalog");
   const tc = await getTranslations("common");
+  const shopId = await requireShopId();
   const { id } = await params;
-  const product = await getProduct(id);
+  const product = await getProduct(shopId, id);
   if (!product) notFound();
 
-  const units = await listUnits();
+  const units = await listUnits(shopId);
   // Load slabs per sale unit for the editor's initial state.
   const slabEntries = await Promise.all(
-    product.saleUnits.map(async (su) => [su.id, await listPriceSlabs(su.id)] as const),
+    product.saleUnits.map(async (su) => [su.id, await listPriceSlabs(shopId, su.id)] as const),
   );
   const initialSlabs: Record<string, { minQty: string; pricePerSaleUnit: number }[]> = {};
   for (const [suId, slabs] of slabEntries) {

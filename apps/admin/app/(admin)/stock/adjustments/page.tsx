@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { listProducts, requirePermission, can, Forbidden } from "@hardware/core";
 import { PageHeader, EmptyState } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { StockNav, Forbid } from "../nav";
 import { AdjustForm, ReturnForm } from "./StockForms";
 
@@ -21,7 +21,8 @@ export default async function AdjustmentsPage() {
   }
 
   const t = await getTranslations("stock");
-  const productPage = await listProducts({ limit: 200 });
+  const shopId = await requireShopId();
+  const productPage = await listProducts(shopId, { limit: 200 });
   const products = productPage.data.map((p) => ({
     id: p.id,
     name: p.name,

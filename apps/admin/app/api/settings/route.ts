@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   getFullStoreConfig,
   updateStoreConfig,
+  requireShop,
   requirePermission,
   updateStoreConfigSchema,
   DomainError,
@@ -18,7 +19,8 @@ export async function GET(): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "settings.read");
-    const config = await getFullStoreConfig();
+    const shopId = requireShop(session);
+    const config = await getFullStoreConfig(shopId);
     if (!config) throw new DomainError("StoreConfig not initialised", "NOT_FOUND");
     return NextResponse.json(config);
   } catch (e) {

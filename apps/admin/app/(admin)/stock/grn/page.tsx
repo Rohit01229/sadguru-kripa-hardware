@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { listProducts, listSuppliers, requirePermission, Forbidden } from "@hardware/core";
 import { PageHeader } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { StockNav, Forbid } from "../nav";
 import { GrnForm } from "./GrnForm";
 
@@ -22,7 +22,8 @@ export default async function GrnPage() {
   const t = await getTranslations("stock");
 
   // Load active products (with sale units, for the receive-unit picker) + suppliers.
-  const [productPage, suppliers] = await Promise.all([listProducts({ limit: 200 }), listSuppliers()]);
+  const shopId = await requireShopId();
+  const [productPage, suppliers] = await Promise.all([listProducts(shopId, { limit: 200 }), listSuppliers(shopId)]);
   const products = productPage.data.map((p) => ({
     id: p.id,
     name: p.name,

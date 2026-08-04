@@ -11,7 +11,7 @@ import {
   TableCell,
   EmptyState,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { StockNav, Forbid } from "../nav";
 import { SupplierForm } from "./SupplierForm";
 
@@ -28,7 +28,8 @@ export default async function SuppliersPage() {
   }
 
   const t = await getTranslations("stock");
-  const suppliers = await listSuppliers();
+  const shopId = await requireShopId();
+  const suppliers = await listSuppliers(shopId);
   const canWrite = can(session, "suppliers.write");
 
   return (

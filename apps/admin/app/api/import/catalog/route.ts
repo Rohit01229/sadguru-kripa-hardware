@@ -21,11 +21,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const form = await req.formData().catch(() => null);
     const file = form?.get("file");
     if (!(file instanceof File)) {
-      return errorResponse(new DomainError("A CSV file is required", "FK_VIOLATION"), rid);
+      return errorResponse(new DomainError("A CSV or Excel file is required", "FK_VIOLATION"), rid);
     }
-    const csvText = await file.text();
+    // Hand the raw bytes over: the service sniffs .xlsx (a ZIP) vs text CSV itself, so a
+    // mislabelled or extension-less upload still imports (19 §9).
+    const bytes = new Uint8Array(await file.arrayBuffer());
 
-    const job = await importCatalog(csvText, { session, requestId: rid });
+    const job = await importCatalog(bytes, { session, requestId: rid });
     return NextResponse.json(
       { jobId: job.id, status: job.status, totalRows: job.totalRows, createdRows: job.createdRows, errorRows: job.errorRows },
       { status: 202 },

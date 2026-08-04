@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { UnitForm, CategoryForm, BrandForm } from "./MasterForms";
 
 // Unit / Category / Brand management (S2). Unit creation needs units.manage;
@@ -28,7 +28,8 @@ export default async function MastersPage() {
 
   const t = await getTranslations("catalog");
   const tc = await getTranslations("common");
-  const [units, brands, tree] = await Promise.all([listUnits(), listBrands(), listCategoryTree()]);
+  const shopId = await requireShopId();
+  const [units, brands, tree] = await Promise.all([listUnits(shopId), listBrands(shopId), listCategoryTree(shopId)]);
   const flat = flatten(tree);
 
   return (

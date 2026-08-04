@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { listMovements, requirePermission, movementsQuerySchema } from "@hardware/core";
+import { listMovements, requireShop, requirePermission, movementsQuerySchema } from "@hardware/core";
 import { getStaffSession } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
@@ -13,6 +13,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "stock.read");
+    const shopId = requireShop(session);
 
     const sp = req.nextUrl.searchParams;
     const query = movementsQuerySchema.parse({
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       cursor: sp.get("cursor") ?? undefined,
       limit: sp.get("limit") ? Number(sp.get("limit")) : undefined,
     });
-    const page = await listMovements(query);
+    const page = await listMovements(shopId, query);
     return NextResponse.json(page);
   } catch (e) {
     return errorResponse(e, rid);

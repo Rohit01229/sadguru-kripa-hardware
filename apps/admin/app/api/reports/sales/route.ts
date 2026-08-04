@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { salesReport, requirePermission, salesReportQuerySchema } from "@hardware/core";
+import { salesReport, requireShop, requirePermission, salesReportQuerySchema } from "@hardware/core";
 import { getStaffSession } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
@@ -12,6 +12,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "reports.read");
+    const shopId = requireShop(session);
 
     const sp = req.nextUrl.searchParams;
     const query = salesReportQuerySchema.parse({
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       to: sp.get("to") ?? undefined,
       groupBy: sp.get("groupBy") ?? undefined,
     });
-    const report = await salesReport(query);
+    const report = await salesReport(shopId, query);
     return NextResponse.json(report);
   } catch (e) {
     return errorResponse(e, rid);

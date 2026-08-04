@@ -12,7 +12,7 @@ import {
   formatMoney,
   formatQty,
 } from "@hardware/ui";
-import { getCustomerSession } from "../../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../../lib/session";
 import {
   fulfilmentLabel,
   orderStatusLabel,
@@ -37,16 +37,17 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const session = await getCustomerSession();
   if (!session || !session.customerId) redirect("/account");
 
+  const shopId = await storefrontShopId();
   const t = await getTranslations("orders");
 
   const { id } = await params;
-  const order = await getMyOrder(session.customerId, id);
+  const order = await getMyOrder(shopId, session.customerId, id);
   if (!order) notFound();
 
   // Resolve display names + sale-unit labels for the lines (small N).
   const enriched = await Promise.all(
     order.lines.map(async (l) => {
-      const p = await getPublicProduct(l.productId);
+      const p = await getPublicProduct(shopId, l.productId);
       const su = p?.saleUnits.find((s) => s.id === l.saleUnitId);
       return {
         ...l,

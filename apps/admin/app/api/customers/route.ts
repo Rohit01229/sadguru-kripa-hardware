@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   listCustomers,
   createCustomer,
+  requireShop,
   requirePermission,
   listCustomersQuerySchema,
   upsertCustomerSchema,
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "customers.read");
+    const shopId = requireShop(session);
 
     const sp = req.nextUrl.searchParams;
     const query = listCustomersQuerySchema.parse({
@@ -28,7 +30,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       cursor: sp.get("cursor") ?? undefined,
       limit: sp.get("limit") ? Number(sp.get("limit")) : undefined,
     });
-    const page = await listCustomers(query);
+    const page = await listCustomers(shopId, query);
     return NextResponse.json(page);
   } catch (e) {
     return errorResponse(e, rid);

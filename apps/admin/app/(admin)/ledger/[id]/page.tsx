@@ -16,7 +16,7 @@ import {
   formatMoney,
   formatDate,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { LedgerNav, Forbid } from "../nav";
 import { RecordPaymentForm, ReminderButton } from "./LedgerActions";
 
@@ -34,8 +34,9 @@ export default async function CustomerStatementPage({ params }: { params: Promis
     throw e;
   }
 
+  const shopId = await requireShopId();
   const { id } = await params;
-  const customer = await getCustomer(id);
+  const customer = await getCustomer(shopId, id);
   if (!customer) notFound();
 
   const t = await getTranslations("ledger");
@@ -47,7 +48,7 @@ export default async function CustomerStatementPage({ params }: { params: Promis
     ADJUSTMENT: t("statement.typeAdjustment"),
   };
 
-  const [statement, age] = await Promise.all([getStatement(id), aging(id)]);
+  const [statement, age] = await Promise.all([getStatement(shopId, id), aging(shopId, id)]);
   const canPay = can(session, "ledger.write");
 
   return (

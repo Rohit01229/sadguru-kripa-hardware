@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getStatement, aging, requirePermission } from "@hardware/core";
+import { getStatement, aging, requireShop, requirePermission } from "@hardware/core";
 import { getStaffSession } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
@@ -15,12 +15,13 @@ export async function GET(
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "ledger.read");
+    const shopId = requireShop(session);
 
     const { id } = await params;
     // Additive statement window (server-side; URL params: from / to, ISO dates).
     const sp = req.nextUrl.searchParams;
     const stmtQuery = { from: sp.get("from") ?? undefined, to: sp.get("to") ?? undefined };
-    const [statement, agingBuckets] = await Promise.all([getStatement(id, stmtQuery), aging(id)]);
+    const [statement, agingBuckets] = await Promise.all([getStatement(shopId, id, stmtQuery), aging(shopId, id)]);
     return NextResponse.json({ ...statement, aging: agingBuckets });
   } catch (e) {
     return errorResponse(e, rid);

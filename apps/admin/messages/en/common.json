@@ -21,7 +21,8 @@
     "loading": "Loading…",
     "export": "Export",
     "import": "Import",
-    "print": "Print"
+    "print": "Print",
+    "saving": "Saving…"
   },
   "status": {
     "empty": "Nothing here yet",
@@ -46,5 +47,8 @@
     "reports": "Reports",
     "settings": "Settings",
     "audit": "Audit"
+  },
+  "errors": {
+    "generic": "Something went wrong."
   }
 }

@@ -18,17 +18,27 @@ import Decimal from "decimal.js";
 import { type Prisma, prisma } from "../shared/db";
 import { toPaise } from "../shared/money";
 import type { Id } from "../shared/types";
+// Reuse the tested per-customer aging math rather than re-deriving buckets here.
+import { aging } from "../ledger/service";
 import {
   salesReportQuerySchema,
   dayEndQuerySchema,
   gstr1QuerySchema,
   stockValuationQuerySchema,
   auditQuerySchema,
+  purchaseReportQuerySchema,
+  receivablesQuerySchema,
+  collectionsQuerySchema,
+  salesReturnsQuerySchema,
   type SalesReportQuery,
   type DayEndQuery,
   type Gstr1Query,
   type StockValuationQuery,
   type AuditQuery,
+  type PurchaseReportQuery,
+  type ReceivablesQuery,
+  type CollectionsQuery,
+  type SalesReturnsQuery,
 } from "./schema";
 import {
   buildGstr1,
@@ -75,10 +85,10 @@ type ReportInvoiceRow = Prisma.InvoiceGetPayload<{ include: typeof reportInvoice
  * Build a productId → base-unit code map for the invoices' line products, in one
  * query, so the HSN summary can carry the UQC without an InvoiceLine→Product relation.
  */
-async function baseUnitMapFor(productIds: string[]): Promise<Map<string, string>> {
+async function baseUnitMapFor(shopId: string, productIds: string[]): Promise<Map<string, string>> {
   if (productIds.length === 0) return new Map();
   const products = await prisma.product.findMany({
-    where: { id: { in: [...new Set(productIds)] } },
+    where: { id: { in: [...new Set(productIds)] }, shopId },
     select: { id: true, baseUnit: { select: { code: true } } },
   });
   return new Map(products.map((p) => [p.id, p.baseUnit.code]));
@@ -140,12 +150,13 @@ export interface SalesReportDTO {
  * by day / item / category / payment-mode. Cancelled invoices and kacha are excluded
  * (kacha has no rows). Money is paise on the wire. Read-only.
  */
-export async function salesReport(query: SalesReportQuery = {}): Promise<SalesReportDTO> {
+export async function salesReport(shopId: string, query: SalesReportQuery = {}): Promise<SalesReportDTO> {
   const { from, to, groupBy } = salesReportQuerySchema.parse(query);
   const toDay = to ?? todayYmd();
   const fromDay = from ?? toDay;
 
   const where: Prisma.InvoiceWhereInput = {
+    shopId,
     status: "ACTIVE",
     date: { gte: dayStart(fromDay), lt: dayEndExclusive(toDay) },
   };
@@ -202,7 +213,7 @@ export async function salesReport(query: SalesReportQuery = {}): Promise<SalesRe
     // item / category: fold InvoiceLines. Resolve product → name/category once.
     const productIds = [...new Set(invoices.flatMap((i) => i.lines.map((l) => l.productId)))];
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds } },
+      where: { id: { in: productIds }, shopId },
       select: { id: true, name: true, sku: true, categoryId: true, category: { select: { name: true } } },
     });
     const pmap = new Map(products.map((p) => [p.id, p]));
@@ -273,7 +284,7 @@ export interface DayEndDTO {
  * excluded from money totals. Payment-mode breakdown uses the day's actual Payment
  * rows. Read-only.
  */
-export async function dayEnd(query: DayEndQuery = {}): Promise<DayEndDTO> {
+export async function dayEnd(shopId: string, query: DayEndQuery = {}): Promise<DayEndDTO> {
   const { date } = dayEndQuerySchema.parse(query);
   const day = date ?? todayYmd();
   const start = dayStart(day);
@@ -287,21 +298,21 @@ export async function dayEnd(query: DayEndQuery = {}): Promise<DayEndDTO> {
   //  - creditNotes: the day's credit notes (count + total).
   const [invoices, payments, creditNotes] = await Promise.all([
     prisma.invoice.findMany({
-      where: { date: { gte: start, lt: endEx } },
+      where: { shopId, date: { gte: start, lt: endEx } },
       include: reportInvoiceInclude,
     }),
     prisma.payment.findMany({
-      where: { date: { gte: start, lt: endEx } },
+      where: { shopId, date: { gte: start, lt: endEx } },
       select: { mode: true, amount: true },
     }),
     prisma.creditNote.findMany({
-      where: { createdAt: { gte: start, lt: endEx } },
+      where: { shopId, createdAt: { gte: start, lt: endEx } },
       select: { grandTotal: true },
     }),
   ]);
 
   // Must stay after the invoices load — it derives productIds from the loaded lines.
-  const baseUnits = await baseUnitMapFor(invoices.flatMap((i) => i.lines.map((l) => l.productId)));
+  const baseUnits = await baseUnitMapFor(shopId, invoices.flatMap((i) => i.lines.map((l) => l.productId)));
   const summary = buildDayEnd(
     day,
     invoices.map((i) => toReportInvoice(i, baseUnits)),
@@ -370,17 +381,17 @@ export interface Gstr1DTO {
   totals: { b2bTaxable: number; b2cTaxable: number; cnTaxable: number; cgst: number; sgst: number; igst: number };
 }
 
-async function loadGstr1Aggregate(period: string): Promise<Gstr1Aggregate> {
+async function loadGstr1Aggregate(shopId: string, period: string): Promise<Gstr1Aggregate> {
   const { start, endExclusive } = periodRange(period);
 
   const invoices = await prisma.invoice.findMany({
-    where: { status: "ACTIVE", date: { gte: start, lt: endExclusive } },
+    where: { shopId, status: "ACTIVE", date: { gte: start, lt: endExclusive } },
     include: reportInvoiceInclude,
     orderBy: { date: "asc" },
   });
 
   const creditNotes = await prisma.creditNote.findMany({
-    where: { createdAt: { gte: start, lt: endExclusive } },
+    where: { shopId, createdAt: { gte: start, lt: endExclusive } },
     include: {
       invoice: { select: { invoiceNo: true, date: true, customerGstinSnap: true, placeOfSupplyState: true } },
       lines: true,
@@ -395,7 +406,7 @@ async function loadGstr1Aggregate(period: string): Promise<Gstr1Aggregate> {
     ...creditNotes.flatMap((cn) => cn.lines.map((l) => l.productId)),
   ];
   const products = await prisma.product.findMany({
-    where: { id: { in: [...new Set(allProductIds)] } },
+    where: { id: { in: [...new Set(allProductIds)] }, shopId },
     select: { id: true, hsnCode: true, baseUnit: { select: { code: true } } },
   });
   const productMeta = new Map(products.map((p) => [p.id, { hsnCode: p.hsnCode, baseUnitCode: p.baseUnit.code }]));
@@ -456,9 +467,9 @@ function gstrInvoiceToDTO(r: Gstr1Aggregate["b2b"][number]): Gstr1InvoiceDTO {
 }
 
 /** GSTR-1 as a typed DTO (paise on the wire). Read-only; reports.export at transport. */
-export async function gstr1(query: Gstr1Query): Promise<Gstr1DTO> {
+export async function gstr1(shopId: string, query: Gstr1Query): Promise<Gstr1DTO> {
   const { period } = gstr1QuerySchema.parse(query);
-  const agg = await loadGstr1Aggregate(period);
+  const agg = await loadGstr1Aggregate(shopId, period);
   return {
     period,
     b2b: agg.b2b.map(gstrInvoiceToDTO),
@@ -496,9 +507,9 @@ export async function gstr1(query: Gstr1Query): Promise<Gstr1DTO> {
 }
 
 /** GSTR-1 as CSV text (the four sections concatenated). Read-only; reports.export. */
-export async function gstr1Csv(query: Gstr1Query): Promise<string> {
+export async function gstr1Csv(shopId: string, query: Gstr1Query): Promise<string> {
   const { period } = gstr1QuerySchema.parse(query);
-  const agg = await loadGstr1Aggregate(period);
+  const agg = await loadGstr1Aggregate(shopId, period);
   return gstr1ToCsv(agg);
 }
 
@@ -525,10 +536,10 @@ export interface StockValuationDTO {
  * Negative on-hand contributes a negative value (it is a real liability the owner
  * should see). Read-only; reports.read at transport.
  */
-export async function stockValuation(query: StockValuationQuery = {}): Promise<StockValuationDTO> {
+export async function stockValuation(shopId: string, query: StockValuationQuery = {}): Promise<StockValuationDTO> {
   const { inStockOnly } = stockValuationQuerySchema.parse(query);
   const products = await prisma.product.findMany({
-    where: { isActive: true },
+    where: { isActive: true, shopId },
     select: {
       id: true,
       sku: true,
@@ -599,10 +610,10 @@ function decodeCursor(cursor: string | undefined): string | undefined {
  * by action / target / actor / date range; cursor-paginated by createdAt,id (DESC —
  * newest first). The log is never edited or deleted; this is the only view onto it.
  */
-export async function listAudit(query: AuditQuery = {}): Promise<AuditPage> {
+export async function listAudit(shopId: string, query: AuditQuery = {}): Promise<AuditPage> {
   const { action, targetType, targetId, actorStaffId, from, to, cursor, limit } = auditQuerySchema.parse(query);
 
-  const where: Prisma.AuditLogWhereInput = {};
+  const where: Prisma.AuditLogWhereInput = { shopId };
   if (action) where.action = action;
   if (targetType) where.targetType = targetType;
   if (targetId) where.targetId = targetId;
@@ -641,6 +652,294 @@ export async function listAudit(query: AuditQuery = {}): Promise<AuditPage> {
       hasNextPage,
       nextCursor: hasNextPage ? encodeCursor(page[page.length - 1]!.id) : null,
     },
+  };
+}
+
+
+// ─────────────────── Purchase report (GRN-backed) ───────────────────
+// What the shop BOUGHT, from the goods-receipt trail. Sales reporting existed; the
+// buying side had none, so a shopkeeper could not answer "what did I spend, and with
+// whom?" — the second question every owner asks after "what did I sell?".
+
+export interface PurchaseGroupRow {
+  key: string;
+  label: string;
+  /** Summed received quantity in base units (item grouping only; null otherwise). */
+  qty: string | null;
+  /** Purchase value in paise (Σ baseQty × costPerBaseUnit). */
+  value: number;
+  /** GRNs (day/supplier) or receipt lines (item). */
+  count: number;
+}
+
+export interface PurchaseReportDTO {
+  from: string;
+  to: string;
+  groupBy: "day" | "supplier" | "item";
+  rows: PurchaseGroupRow[];
+  totalValue: number;
+  grnCount: number;
+}
+
+export async function purchaseReport(
+  shopId: string,
+  query: PurchaseReportQuery = {},
+): Promise<PurchaseReportDTO> {
+  const { from, to, groupBy } = purchaseReportQuerySchema.parse(query);
+  const toDay = to ?? todayYmd();
+  const fromDay = from ?? toDay;
+
+  const receipts = await prisma.goodsReceipt.findMany({
+    where: { shopId, date: { gte: dayStart(fromDay), lt: dayEndExclusive(toDay) } },
+    include: { lines: true, supplier: { select: { id: true, name: true } } },
+    orderBy: { date: "asc" },
+  });
+
+  const lineValue = (l: { baseQty: Prisma.Decimal; costPerBaseUnit: Prisma.Decimal }) =>
+    new Decimal(l.baseQty).times(l.costPerBaseUnit);
+
+  let total = new Decimal(0);
+  const rows: PurchaseGroupRow[] = [];
+
+  if (groupBy === "item") {
+    const map = new Map<string, { qty: Decimal; value: Decimal; count: number }>();
+    for (const grn of receipts) {
+      for (const l of grn.lines) {
+        const v = lineValue(l);
+        total = total.plus(v);
+        const cur = map.get(l.productId) ?? { qty: new Decimal(0), value: new Decimal(0), count: 0 };
+        cur.qty = cur.qty.plus(l.baseQty);
+        cur.value = cur.value.plus(v);
+        cur.count += 1;
+        map.set(l.productId, cur);
+      }
+    }
+    // One lookup for names + base-unit codes, rather than N per row.
+    const products = await prisma.product.findMany({
+      where: { shopId, id: { in: [...map.keys()] } },
+      select: { id: true, name: true, sku: true, baseUnit: { select: { code: true } } },
+    });
+    const pmap = new Map(products.map((p) => [p.id, p]));
+    for (const [productId, agg] of map) {
+      const p = pmap.get(productId);
+      rows.push({
+        key: productId,
+        label: p ? `${p.name} (${p.sku})` : productId.slice(0, 8),
+        qty: `${agg.qty.toString()}${p ? ` ${p.baseUnit.code}` : ""}`,
+        value: toPaise(agg.value),
+        count: agg.count,
+      });
+    }
+    rows.sort((a, b) => b.value - a.value);
+  } else {
+    const map = new Map<string, { label: string; value: Decimal; count: number }>();
+    for (const grn of receipts) {
+      const v = grn.lines.reduce((n, l) => n.plus(lineValue(l)), new Decimal(0));
+      total = total.plus(v);
+      const key = groupBy === "day" ? grn.date.toISOString().slice(0, 10) : (grn.supplier?.id ?? "__none__");
+      const label = groupBy === "day" ? key : (grn.supplier?.name ?? "No supplier recorded");
+      const cur = map.get(key) ?? { label, value: new Decimal(0), count: 0 };
+      cur.value = cur.value.plus(v);
+      cur.count += 1;
+      map.set(key, cur);
+    }
+    for (const [key, agg] of map) {
+      rows.push({ key, label: agg.label, qty: null, value: toPaise(agg.value), count: agg.count });
+    }
+    rows.sort((a, b) => (groupBy === "day" ? a.key.localeCompare(b.key) : b.value - a.value));
+  }
+
+  return { from: fromDay, to: toDay, groupBy, rows, totalValue: toPaise(total), grnCount: receipts.length };
+}
+
+// ─────────────────── Receivables / party outstanding (khata) ───────────────────
+// For a credit-heavy hardware shop this is THE report: who owes me, and for how long.
+// The per-customer aging math already exists and is tested (ledger.aging); this
+// assembles it into one ranked call-sheet.
+
+export interface ReceivableRowDTO {
+  customerId: Id;
+  name: string;
+  phone: string | null;
+  outstanding: number; // paise
+  bucket0to30: number;
+  bucket31to60: number;
+  bucket60plus: number;
+}
+
+export interface ReceivablesDTO {
+  asOf: string;
+  rows: ReceivableRowDTO[];
+  totalOutstanding: number;
+  total0to30: number;
+  total31to60: number;
+  total60plus: number;
+  /** Parties considered, before the dueOnly filter. */
+  partyCount: number;
+}
+
+export async function receivables(shopId: string, query: ReceivablesQuery = {}): Promise<ReceivablesDTO> {
+  const { dueOnly, asOf, limit } = receivablesQuerySchema.parse(query);
+  const asOfDay = asOf ?? todayYmd();
+  // Age from the END of the as-of day, so an entry posted that day lands in 0–30
+  // rather than looking negative-aged.
+  const now = dayEndExclusive(asOfDay);
+
+  const customers = await prisma.customer.findMany({
+    where: { shopId },
+    select: { id: true, name: true, phone: true },
+    orderBy: { name: "asc" },
+  });
+
+  const rows: ReceivableRowDTO[] = [];
+  for (const c of customers) {
+    const a = await aging(shopId, c.id, now);
+    if (dueOnly && a.outstanding <= 0) continue;
+    rows.push({
+      customerId: c.id,
+      name: c.name,
+      phone: c.phone,
+      outstanding: a.outstanding,
+      bucket0to30: a.bucket0to30,
+      bucket31to60: a.bucket31to60,
+      bucket60plus: a.bucket60plus,
+    });
+  }
+  // Biggest debtors first — this is a call sheet, not an alphabetical directory.
+  rows.sort((x, y) => y.outstanding - x.outstanding);
+
+  const sum = (pick: (r: ReceivableRowDTO) => number) => rows.reduce((n, r) => n + pick(r), 0);
+  return {
+    asOf: asOfDay,
+    rows: rows.slice(0, limit),
+    totalOutstanding: sum((r) => r.outstanding),
+    total0to30: sum((r) => r.bucket0to30),
+    total31to60: sum((r) => r.bucket31to60),
+    total60plus: sum((r) => r.bucket60plus),
+    partyCount: customers.length,
+  };
+}
+
+// ─────────────────── Collections (payments received) ───────────────────
+// Day-end answers "what came in today". This answers it over a RANGE, which is what
+// reconciling a week against the cash box or a bank statement actually needs.
+
+export interface CollectionRow {
+  key: string;
+  label: string;
+  amount: number; // paise
+  count: number;
+}
+
+export interface CollectionsDTO {
+  from: string;
+  to: string;
+  groupBy: "day" | "mode";
+  rows: CollectionRow[];
+  total: number;
+  count: number;
+}
+
+export async function collections(shopId: string, query: CollectionsQuery = {}): Promise<CollectionsDTO> {
+  const { from, to, groupBy } = collectionsQuerySchema.parse(query);
+  const toDay = to ?? todayYmd();
+  const fromDay = from ?? toDay;
+
+  const payments = await prisma.payment.findMany({
+    where: { shopId, date: { gte: dayStart(fromDay), lt: dayEndExclusive(toDay) } },
+    select: { amount: true, mode: true, date: true },
+    orderBy: { date: "asc" },
+  });
+
+  const map = new Map<string, { amount: Decimal; count: number }>();
+  let total = new Decimal(0);
+  for (const p of payments) {
+    total = total.plus(p.amount);
+    const key = groupBy === "day" ? p.date.toISOString().slice(0, 10) : p.mode;
+    const cur = map.get(key) ?? { amount: new Decimal(0), count: 0 };
+    cur.amount = cur.amount.plus(p.amount);
+    cur.count += 1;
+    map.set(key, cur);
+  }
+
+  const rows: CollectionRow[] = [...map.entries()].map(([key, agg]) => ({
+    key,
+    label: key,
+    amount: toPaise(agg.amount),
+    count: agg.count,
+  }));
+  rows.sort((a, b) => (groupBy === "day" ? a.key.localeCompare(b.key) : b.amount - a.amount));
+
+  return { from: fromDay, to: toDay, groupBy, rows, total: toPaise(total), count: payments.length };
+}
+
+// ─────────────────── Sales returns (credit notes) ───────────────────
+
+export interface SalesReturnRow {
+  id: Id;
+  creditNoteNo: string;
+  date: string;
+  invoiceNo: string;
+  customerName: string | null;
+  reason: string | null;
+  refundMode: string | null;
+  taxableTotal: number;
+  taxTotal: number;
+  grandTotal: number;
+}
+
+export interface SalesReturnsDTO {
+  from: string;
+  to: string;
+  rows: SalesReturnRow[];
+  totalTaxable: number;
+  totalTax: number;
+  totalGrand: number;
+  count: number;
+}
+
+export async function salesReturns(shopId: string, query: SalesReturnsQuery = {}): Promise<SalesReturnsDTO> {
+  const { from, to } = salesReturnsQuerySchema.parse(query);
+  const toDay = to ?? todayYmd();
+  const fromDay = from ?? toDay;
+
+  const notes = await prisma.creditNote.findMany({
+    where: { shopId, createdAt: { gte: dayStart(fromDay), lt: dayEndExclusive(toDay) } },
+    include: { invoice: { select: { invoiceNo: true, customerNameSnap: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  let totTaxable = new Decimal(0);
+  let totTax = new Decimal(0);
+  let totGrand = new Decimal(0);
+
+  const rows: SalesReturnRow[] = notes.map((n) => {
+    const tax = new Decimal(n.cgstTotal).plus(n.sgstTotal).plus(n.igstTotal);
+    totTaxable = totTaxable.plus(n.taxableTotal);
+    totTax = totTax.plus(tax);
+    totGrand = totGrand.plus(n.grandTotal);
+    return {
+      id: n.id,
+      creditNoteNo: n.creditNoteNo,
+      date: n.createdAt.toISOString(),
+      invoiceNo: n.invoice.invoiceNo,
+      customerName: n.invoice.customerNameSnap,
+      reason: n.reason,
+      refundMode: n.refundMode,
+      taxableTotal: toPaise(n.taxableTotal),
+      taxTotal: toPaise(tax),
+      grandTotal: toPaise(n.grandTotal),
+    };
+  });
+
+  return {
+    from: fromDay,
+    to: toDay,
+    rows,
+    totalTaxable: toPaise(totTaxable),
+    totalTax: toPaise(totTax),
+    totalGrand: toPaise(totGrand),
+    count: notes.length,
   };
 }
 

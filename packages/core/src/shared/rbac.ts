@@ -44,6 +44,14 @@ export type Realm = "STAFF" | "CUSTOMER";
 export interface Session {
   userId: string;
   realm: Realm;
+  /**
+   * The tenant (shop) this principal is scoped to (17 — multi-tenancy). Every core
+   * service that touches business data resolves it via {@link requireShop}, so a
+   * request can only ever read/write its own shop's rows. Optional on the type (the
+   * platform realm and mid-transition rows may lack it) but REQUIRED in practice for
+   * any STAFF/CUSTOMER action — `requireShop` throws when it is missing.
+   */
+  shopId?: string;
   /** Role keys held by the principal (e.g. ["OWNER"]); used for `roleAtTime` in audit, never for branching. */
   roles?: readonly string[];
   /** For CUSTOMER sessions: the Customer party id this account belongs to (ownership checks). */
@@ -60,4 +68,15 @@ export function requirePermission(session: Session, permission: Permission): voi
   if (!can(session, permission)) {
     throw new Forbidden(permission);
   }
+}
+
+/**
+ * Resolve the caller's shop id or refuse (17 — multi-tenancy). Call ONCE at the top
+ * of every service that reads or writes tenant data, then thread the returned
+ * `shopId` into every `where`/`data`. A session with no shop can never touch business
+ * rows — the single choke-point that makes cross-tenant access impossible.
+ */
+export function requireShop(session: Session): string {
+  if (!session.shopId) throw new Forbidden("shop-scope");
+  return session.shopId;
 }

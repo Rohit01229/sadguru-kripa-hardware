@@ -38,11 +38,19 @@ export interface ReservationExpiryResult {
  * acts on still-ACTIVE rows → idempotent: a second run releases nothing more (the
  * first flipped them to EXPIRED). Audited as a system act when anything was freed.
  */
-export async function runReservationExpiry(now: Date = new Date()): Promise<ReservationExpiryResult> {
+export async function runReservationExpiry(
+  shopId: string | null = null,
+  now: Date = new Date(),
+): Promise<ReservationExpiryResult> {
   const { released } = await runTx(async (tx) => {
-    const res = await releaseExpired(tx, now);
-    if (res.released > 0) {
+    // shopId === null → release across ALL shops (system-wide run — 17 §6); a concrete
+    // shopId scopes to one tenant (the cron loops shops and calls per-shop).
+    const res = await releaseExpired(tx, shopId ?? null, now);
+    // Audit requires a shopId; when a per-shop run freed rows, attribute it to that shop.
+    // A global (null) run skips the single system audit row (no single shop to attribute).
+    if (res.released > 0 && shopId) {
       await audit(tx, {
+        shopId,
         actorStaffId: null,
         roleAtTime: "SYSTEM",
         permissionUsed: null,
@@ -84,18 +92,19 @@ export interface KhataReminderResult {
  * sender in without coupling core to a mail provider.
  */
 export async function runKhataReminders(
+  shopId: string,
   notify?: (c: KhataReminderCustomer) => Promise<void>,
   now: Date = new Date(),
 ): Promise<KhataReminderResult> {
   // Net each customer's ledger, then age only those in debit. We fold in JS to reuse
   // the same FIFO aging logic shape as ledger.aging without N round-trips.
-  const customers = await prisma.customer.findMany({ select: { id: true, name: true } });
+  const customers = await prisma.customer.findMany({ where: { shopId }, select: { id: true, name: true } });
   const overdue: KhataReminderCustomer[] = [];
   const DAY = 24 * 60 * 60 * 1000;
 
   for (const c of customers) {
     const rows = await prisma.ledgerEntry.findMany({
-      where: { customerId: c.id },
+      where: { customerId: c.id, shopId },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { amount: true, createdAt: true },
     });
@@ -165,9 +174,9 @@ export interface DayEndRollupResult {
  * 13 reports note), so it is trivially idempotent. Defaults to "yesterday" relative
  * to `now` since the cron runs after midnight.
  */
-export async function runDayEndRollup(now: Date = new Date()): Promise<DayEndRollupResult> {
+export async function runDayEndRollup(shopId: string, now: Date = new Date()): Promise<DayEndRollupResult> {
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const summary = await dayEnd({ date: yesterday });
+  const summary = await dayEnd(shopId, { date: yesterday });
   return { job: "day-end-rollup", summary, at: now.toISOString() };
 }
 
@@ -180,8 +189,8 @@ export interface LowStockAlertResult {
 }
 
 /** Collect items at/below reorder level (read-only; alert source — 03 §10). Idempotent. */
-export async function runLowStockAlerts(now: Date = new Date()): Promise<LowStockAlertResult> {
-  const rows = await lowStock(200);
+export async function runLowStockAlerts(shopId: string, now: Date = new Date()): Promise<LowStockAlertResult> {
+  const rows = await lowStock(shopId, 200);
   return {
     job: "low-stock-alerts",
     items: rows.map((r) => ({ productId: r.productId, sku: r.sku, name: r.name, onHand: r.onHand, reorderLevel: r.reorderLevel })),
@@ -198,8 +207,8 @@ export interface NearExpiryAlertResult {
 }
 
 /** Collect batches nearing/at expiry within the window (read-only; 03 §10). Idempotent. */
-export async function runNearExpiryAlerts(withinDays = 30, now: Date = new Date()): Promise<NearExpiryAlertResult> {
-  const rows = await nearExpiry({ withinDays });
+export async function runNearExpiryAlerts(shopId: string, withinDays = 30, now: Date = new Date()): Promise<NearExpiryAlertResult> {
+  const rows = await nearExpiry(shopId, { withinDays });
   return {
     job: "near-expiry-alerts",
     batches: rows.map((b) => ({
@@ -236,10 +245,11 @@ export interface BatchReconResult {
  * NOTE: only products that USE batches are reconciled — a non-batched product
  * legitimately has Σ(Batch)=0 while ProductStock.onHand>0, which is NOT drift.
  */
-export async function runBatchReconciliation(repair = false, now: Date = new Date()): Promise<BatchReconResult> {
-  // Sum batch on-hand per product (only products that have batches).
+export async function runBatchReconciliation(shopId: string, repair = false, now: Date = new Date()): Promise<BatchReconResult> {
+  // Sum batch on-hand per product (only products that have batches), scoped to the shop.
   const batchSums = await prisma.batch.groupBy({
     by: ["productId"],
+    where: { shopId },
     _sum: { onHand: true },
   });
 
@@ -248,8 +258,8 @@ export async function runBatchReconciliation(repair = false, now: Date = new Dat
 
   for (const bs of batchSums) {
     const batchSum = new Decimal(bs._sum.onHand ?? 0);
-    const stock = await prisma.productStock.findUnique({
-      where: { productId: bs.productId },
+    const stock = await prisma.productStock.findFirst({
+      where: { productId: bs.productId, shopId },
       select: { onHand: true },
     });
     const psOnHand = new Decimal(stock?.onHand ?? 0);
@@ -268,6 +278,7 @@ export async function runBatchReconciliation(repair = false, now: Date = new Dat
             data: { onHand: new Prisma.Decimal(batchSum.toFixed(3)) },
           });
           await audit(tx, {
+            shopId,
             actorStaffId: null,
             roleAtTime: "SYSTEM",
             permissionUsed: null,

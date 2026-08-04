@@ -6,13 +6,15 @@ import {
   finalizeKachaAction,
   finalizePakkaAction,
   convertKachaAction,
+  quickCreateItemAction,
   type KachaActionState,
   type PakkaActionState,
 } from "./actions";
 import { previewTotals, type PreviewLine } from "./preview";
+import { buildWhatsAppUrl } from "./share";
 import { InvoicePrint, KachaPrint, type StoreBranding, type LineLabelLookup } from "./print/Templates";
 import { PosCustomerPicker } from "./PosCustomerPicker";
-import type { InvoiceDTO, KachaEstimate } from "@hardware/core";
+import type { InvoiceDTO, KachaEstimate, BillTheme } from "@hardware/core";
 import {
   Button,
   Input,
@@ -44,6 +46,7 @@ export interface PosProduct {
   id: string;
   name: string;
   sku: string;
+  barcode: string | null;
   gstRatePct: string;
   priceInclusive: boolean;
   hsnCode: string | null;
@@ -66,6 +69,7 @@ interface ApiProductSummary {
   id: string;
   name: string;
   sku: string;
+  barcode: string | null;
   gstRatePct: string;
   priceInclusive: boolean;
   hsnCode: string | null;
@@ -80,6 +84,7 @@ function toPosProduct(p: ApiProductSummary): PosProduct {
     id: p.id,
     name: p.name,
     sku: p.sku,
+    barcode: p.barcode ?? null,
     gstRatePct: p.gstRatePct,
     priceInclusive: p.priceInclusive,
     hsnCode: p.hsnCode,
@@ -123,6 +128,7 @@ export function PosClient({
   homeState,
   storeName,
   store,
+  billTheme,
   mayKacha,
   mayPakka,
 }: {
@@ -134,6 +140,8 @@ export function PosClient({
   /** Full print branding from StoreConfig (address/GSTIN/bank/terms). Falls back to
    *  storeName-only when absent so the receipt still renders. */
   store?: StoreBranding;
+  /** The shop's saved bill look (19 §7); undefined → documented defaults. */
+  billTheme?: BillTheme;
   mayKacha: boolean;
   mayPakka: boolean;
 }) {
@@ -203,12 +211,46 @@ export function PosClient({
     });
   }, [invoice, byId]);
 
+  // WhatsApp deep link for the finished bill. Uses the picked customer's number when we
+  // have one; otherwise WhatsApp asks the operator to choose a contact — the right
+  // behaviour for a walk-in whose number we never took (19 §5).
+  const shareUrl = useMemo(() => {
+    if (!invoice) return "";
+    const labelOf = (productId: string, saleUnitId: string) =>
+      invoiceLineLabels.find((l) => l.productId === productId && l.saleUnitId === saleUnitId)?.label ??
+      productId.slice(0, 8);
+    return buildWhatsAppUrl(
+      {
+        invoiceNo: invoice.invoiceNo,
+        grandTotal: invoice.grandTotal,
+        date: invoice.date,
+        lines: invoice.lines.map((l) => ({
+          name: labelOf(l.productId, l.saleUnitId),
+          qty: l.saleQty,
+          amount: l.taxableValue + l.cgst + l.sgst + l.igst,
+        })),
+      },
+      branding.name,
+      customer?.phone ?? null,
+    );
+  }, [invoice, invoiceLineLabels, branding.name, customer]);
+
   // ── Search results ──
   // Instant local matches over the first catalog page (name / SKU, case-insensitive)…
   const localResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
-    return catalog.filter((p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+    const hits = catalog.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        (p.barcode !== null && p.barcode.toLowerCase() === q),
+    );
+    // An EXACT barcode hit is a scan, not a guess — float it to the top so Enter (which
+    // the scanner sends automatically) always rings up the scanned item (19 §4).
+    const scanned = hits.findIndex((p) => p.barcode !== null && p.barcode.toLowerCase() === q);
+    if (scanned > 0) hits.unshift(...hits.splice(scanned, 1));
+    return hits;
   }, [catalog, search]);
 
   // …plus server matches so the operator can ring up ANY product, not just the first
@@ -216,6 +258,13 @@ export function PosClient({
   // hsn). The AbortController makes the latest keystroke win. Results are merged into the
   // catalog on pick so the cart/preview/print can resolve them.
   const [remoteResults, setRemoteResults] = useState<PosProduct[]>([]);
+
+  // Inline item creation from the search box (19 §6).
+  const [quickItemOpen, setQuickItemOpen] = useState(false);
+  const [quickItemName, setQuickItemName] = useState("");
+  const [quickItemPrice, setQuickItemPrice] = useState("");
+  const [quickItemBusy, setQuickItemBusy] = useState(false);
+  const [quickItemError, setQuickItemError] = useState<string | null>(null);
   useEffect(() => {
     const q = search.trim();
     if (q.length < 1) {
@@ -263,13 +312,58 @@ export function PosClient({
     // Ensure the product is in the catalog so byId (cart/preview/print labels) can
     // resolve it — a server-search result is not in the seeded first page.
     setCatalog((cur) => (cur.some((c) => c.id === p.id) ? cur : [...cur, p]));
-    setLines((ls) => [
-      ...ls,
-      { key: keySeq++, productId: p.id, saleUnitId: def.id, quantity: "1", rateOverride: "", lineDiscount: "" },
-    ]);
+    setLines((ls) => {
+      // Ringing up the same item again BUMPS THE QUANTITY instead of stacking a second
+      // identical line — what every till does, and what scanning three of the same box
+      // should mean. Only merges into a plain line: once the operator has overridden the
+      // rate or given a line discount, that line is bespoke and must be left alone.
+      const idx = ls.findIndex(
+        (l) =>
+          l.productId === p.id &&
+          l.saleUnitId === def.id &&
+          l.rateOverride.trim() === "" &&
+          l.lineDiscount.trim() === "",
+      );
+      if (idx >= 0) {
+        const cur = ls[idx]!;
+        const next = Number(cur.quantity || "0") + 1;
+        // Guard against a non-numeric quantity the operator half-typed.
+        if (Number.isFinite(next)) {
+          return ls.map((l, i) => (i === idx ? { ...l, quantity: String(next) } : l));
+        }
+      }
+      return [
+        ...ls,
+        { key: keySeq++, productId: p.id, saleUnitId: def.id, quantity: "1", rateOverride: "", lineDiscount: "" },
+      ];
+    });
     setSearch("");
     setRemoteResults([]);
     searchRef.current?.focus();
+  }
+
+  // Quick "add this item" from the search box (19 §6). Goes through the same guarded
+  // core create as the catalog form — the server back-fills item code/unit/category.
+  async function saveQuickItem() {
+    const name = quickItemName.trim();
+    if (!name) {
+      setQuickItemError(t("pos.quickItemNameRequired"));
+      return;
+    }
+    if (quickItemPrice.trim() === "") {
+      setQuickItemError(t("pos.quickItemPriceRequired"));
+      return;
+    }
+    setQuickItemBusy(true);
+    setQuickItemError(null);
+    const res = await quickCreateItemAction(name, quickItemPrice, "18");
+    setQuickItemBusy(false);
+    if (res.product) {
+      setQuickItemOpen(false);
+      addProduct(res.product); // straight into the cart — that was the point
+    } else {
+      setQuickItemError(res.error ?? t("pos.quickItemFailed"));
+    }
   }
 
   function patchLine(key: number, patch: Partial<CartLine>) {
@@ -509,6 +603,61 @@ export function PosClient({
             role="combobox"
             aria-controls="pos-search-results"
           />
+          {/* Nothing matched — offer to CREATE the item right here rather than sending the
+              operator to the catalog mid-sale (19 §6). Two fields: name + price. */}
+          {search.trim().length >= 2 && results.length === 0 && (
+            <div className="absolute z-20 mt-1 w-full rounded-md border bg-card p-3 shadow-md">
+              {quickItemOpen ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">{t("pos.quickItemHeading")}</p>
+                  <Input
+                    value={quickItemName}
+                    onChange={(e) => setQuickItemName(e.target.value)}
+                    placeholder={t("pos.quickItemNamePlaceholder")}
+                    autoFocus
+                  />
+                  <Input
+                    value={quickItemPrice}
+                    onChange={(e) => setQuickItemPrice(e.target.value)}
+                    placeholder={t("pos.quickItemPricePlaceholder")}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    inputMode="decimal"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void saveQuickItem();
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" onClick={() => void saveQuickItem()} isLoading={quickItemBusy}>
+                      {t("pos.quickItemSave")}
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setQuickItemOpen(false)}>
+                      {tCommon("actions.cancel")}
+                    </Button>
+                  </div>
+                  {quickItemError && <p className="text-xs text-destructive">{quickItemError}</p>}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickItemName(search.trim());
+                    setQuickItemPrice("");
+                    setQuickItemError(null);
+                    setQuickItemOpen(true);
+                  }}
+                  className="flex min-h-[44px] w-full items-center gap-2 text-left text-sm font-medium text-primary hover:underline sm:min-h-0"
+                >
+                  <span aria-hidden="true">＋</span>
+                  {t("pos.addNewItem", { name: search.trim() })}
+                </button>
+              )}
+            </div>
+          )}
           {results.length > 0 && (
             <ul
               id="pos-search-results"
@@ -1033,11 +1182,24 @@ export function PosClient({
                   : ""}
               </span>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => window.print()}>
-              {tCommon("actions.print")}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Share first, print second — sending the bill is the common case (19 §5). */}
+              <Button type="button" size="sm" asChild>
+                <a href={shareUrl} target="_blank" rel="noopener noreferrer">
+                  {t("pos.sendWhatsApp")}
+                </a>
+              </Button>
+              <Button type="button" variant="outline" size="sm" asChild>
+                <a href={`/api/billing/invoices/${invoice.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                  {t("pos.downloadPdf")}
+                </a>
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => window.print()}>
+                {tCommon("actions.print")}
+              </Button>
+            </div>
           </Card>
-          <InvoicePrint invoice={invoice} store={branding} size={printSize} lineLabels={invoiceLineLabels} />
+          <InvoicePrint invoice={invoice} store={branding} size={printSize} lineLabels={invoiceLineLabels} theme={billTheme} />
         </div>
       )}
       {estimate && (
@@ -1051,7 +1213,7 @@ export function PosClient({
               {t("pos.printEstimate")}
             </Button>
           </Card>
-          <KachaPrint estimate={estimate} store={branding} size={printSize} />
+          <KachaPrint estimate={estimate} store={branding} size={printSize} theme={billTheme} />
         </div>
       )}
     </div>

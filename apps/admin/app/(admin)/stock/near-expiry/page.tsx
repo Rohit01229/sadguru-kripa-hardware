@@ -14,7 +14,7 @@ import {
   formatQty,
   formatDate,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { StockNav, Forbid } from "../nav";
 import { NearExpiryFilterBar } from "./NearExpiryFilterBar";
 
@@ -37,7 +37,8 @@ export default async function NearExpiryPage({
   const t = await getTranslations("stock");
   const sp = await searchParams;
   const withinDays = sp.withinDays ? Number(sp.withinDays) : 30;
-  const rows = await nearExpiry({ withinDays });
+  const shopId = await requireShopId();
+  const rows = await nearExpiry(shopId, { withinDays });
 
   return (
     <div className="space-y-6">

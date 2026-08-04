@@ -5,13 +5,15 @@ import {
   listUnits,
   listBrands,
   listCategoryTree,
+  getLastUsedGstRate,
+  ensureDefaultMastersForShop,
   requirePermission,
   Forbidden,
   type CategoryNode,
 } from "@hardware/core";
-import { Button, EmptyState, ForbiddenState, PageHeader } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
-import { ProductForm } from "../ProductForm";
+import { ForbiddenState, PageHeader } from "@hardware/ui";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
+import { ItemForm } from "../ItemForm";
 
 export default async function NewProductPage() {
   const session = await getStaffSession();
@@ -31,30 +33,39 @@ export default async function NewProductPage() {
 
   const t = await getTranslations("catalog");
   const tc = await getTranslations("common");
-  const [units, brands, tree] = await Promise.all([listUnits(), listBrands(), listCategoryTree()]);
-  const categories = flatten(tree);
+  const shopId = await requireShopId();
+
+  let [units, brands, tree, lastGst] = await Promise.all([
+    listUnits(shopId),
+    listBrands(shopId),
+    listCategoryTree(shopId),
+    getLastUsedGstRate(shopId),
+  ]);
+
+  // No masters wall (19 §2). A brand-new shop has no units yet, but the Unit select
+  // needs options — so seed the starter set here (idempotent; only fires when the
+  // shop is genuinely empty) instead of sending the shopkeeper to a set-up screen
+  // before their first item. `createProduct` performs the same back-fill server-side,
+  // so this is purely so the dropdown has something to show.
+  if (units.length === 0) {
+    await ensureDefaultMastersForShop(shopId);
+    [units, tree] = await Promise.all([listUnits(shopId), listCategoryTree(shopId)]);
+  }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <PageHeader
-        title={t("form.newTitle")}
-        description={t("form.newDescription")}
-        breadcrumbs={[{ label: tc("nav.catalog"), href: "/catalog" }, { label: t("form.newTitle") }]}
+        title={t("form.itemTitle")}
+        description={t("form.itemDescription")}
+        breadcrumbs={[{ label: tc("nav.catalog"), href: "/catalog" }, { label: t("form.itemTitle") }]}
         linkComponent={Link}
       />
-      {units.length === 0 || categories.length === 0 ? (
-        <EmptyState
-          title={t("form.mastersFirstTitle")}
-          description={t("form.mastersFirstDescription")}
-          action={
-            <Button asChild>
-              <Link href="/catalog/masters">{t("form.addUnitsCategories")}</Link>
-            </Button>
-          }
-        />
-      ) : (
-        <ProductForm units={units} categories={categories} brands={brands} />
-      )}
+      <ItemForm
+        units={units}
+        categories={flatten(tree)}
+        brands={brands}
+        defaultGstRate={lastGst ?? "18"}
+      />
     </div>
   );
 }

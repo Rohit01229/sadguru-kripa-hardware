@@ -11,7 +11,7 @@
 import Decimal from "decimal.js";
 import { Prisma, prisma, runTx, type Tx } from "../shared/db";
 import { audit } from "../shared/audit";
-import { requirePermission, type Session } from "../shared/rbac";
+import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";
 import { fromPaise, toPaise } from "../shared/money";
 import { findIdempotent, hashRequest, storeIdempotent } from "../shared/idempotency";
@@ -71,6 +71,7 @@ export interface LedgerRef {
  */
 export async function post(
   tx: Tx,
+  shopId: string,
   customerId: string,
   type: LedgerEntryType,
   amount: Decimal.Value,
@@ -82,6 +83,7 @@ export async function post(
 
   const row = await tx.ledgerEntry.create({
     data: {
+      shopId,
       customerId,
       type,
       amount: money2(signed),
@@ -174,11 +176,14 @@ export function inAgingBucket(a: AgingDTO, bucket: AgingBucket): boolean {
  * mirroring listStock's lowStockOnly. The plain `q`-only path is unchanged and keeps
  * full cursor pagination.
  */
-export async function listCustomers(query: ListCustomersQuery = {}): Promise<CustomerPage> {
+export async function listCustomers(
+  shopId: string,
+  query: ListCustomersQuery = {},
+): Promise<CustomerPage> {
   const { q, hasOutstanding, agingBucket, cursor, limit } = listCustomersQuerySchema.parse(query);
   const derived = hasOutstanding === true || agingBucket !== undefined;
 
-  const where: Prisma.CustomerWhereInput = {};
+  const where: Prisma.CustomerWhereInput = { shopId };
   if (q && q.length > 0) {
     where.OR = [
       { name: { contains: q, mode: "insensitive" } },
@@ -215,7 +220,7 @@ export async function listCustomers(query: ListCustomersQuery = {}): Promise<Cus
   const matched: CustomerDTO[] = [];
   for (const c of rows) {
     if (matched.length >= limit) break;
-    const a = await aging(c.id);
+    const a = await aging(shopId, c.id);
     if (hasOutstanding === true && a.outstanding <= 0) continue;
     if (agingBucket !== undefined && !inAgingBucket(a, agingBucket)) continue;
     const dto = toCustomerDTO(c);
@@ -227,23 +232,25 @@ export async function listCustomers(query: ListCustomersQuery = {}): Promise<Cus
   return { data: matched, pageInfo: { hasNextPage: false, nextCursor: null } };
 }
 
-/** Single counter customer with current outstanding. Returns null if missing. */
-export async function getCustomer(id: Id): Promise<CustomerDTO | null> {
-  const c = await prisma.customer.findUnique({ where: { id } });
+/** Single counter customer with current outstanding. Returns null if missing. Shop-scoped (17). */
+export async function getCustomer(shopId: string, id: Id): Promise<CustomerDTO | null> {
+  const c = await prisma.customer.findFirst({ where: { id, shopId } });
   if (!c) return null;
   const dto = toCustomerDTO(c);
-  dto.outstanding = await outstanding(id);
+  dto.outstanding = await outstanding(shopId, id);
   return dto;
 }
 
 /** Create a counter customer (name/phone/GSTIN/type). Audited. */
 export async function createCustomer(input: UpsertCustomerInput, ctx: LedgerCtx): Promise<CustomerDTO> {
   requirePermission(ctx.session, "customers.write");
+  const shopId = requireShop(ctx.session);
   const data = upsertCustomerSchema.parse(input);
 
   const created = await runTx(async (tx) => {
     const c = await tx.customer.create({
       data: {
+        shopId,
         name: data.name,
         phone: data.phone ?? null,
         gstin: data.gstin ?? null,
@@ -252,6 +259,7 @@ export async function createCustomer(input: UpsertCustomerInput, ctx: LedgerCtx)
       },
     });
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "customers.write",
       action: "customer.create",
@@ -302,18 +310,19 @@ export interface StatementDTO {
  * the filter — only the visible rows do.
  */
 export async function getStatement(
+  shopId: string,
   customerId: Id,
   query: StatementQuery = {},
 ): Promise<StatementDTO> {
   const { from, to } = statementQuerySchema.parse(query);
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, shopId },
     select: { id: true, name: true },
   });
   if (!customer) throw new DomainError(`Customer ${customerId} not found`, "NOT_FOUND");
 
   const rows = await prisma.ledgerEntry.findMany({
-    where: { customerId },
+    where: { customerId, shopId },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 
@@ -354,10 +363,10 @@ export async function getStatement(
   };
 }
 
-/** Current outstanding for a customer in paise (+ = owes the shop). */
-export async function outstanding(customerId: Id): Promise<number> {
+/** Current outstanding for a customer in paise (+ = owes the shop). Shop-scoped (17). */
+export async function outstanding(shopId: string, customerId: Id): Promise<number> {
   const agg = await prisma.ledgerEntry.aggregate({
-    where: { customerId },
+    where: { customerId, shopId },
     _sum: { amount: true },
   });
   return toPaise(agg._sum.amount ?? new Decimal(0));
@@ -379,9 +388,9 @@ export interface AgingDTO {
  * invoices first. Each remaining (unsettled) debit is bucketed by its age. A net
  * credit balance (customer in credit) buckets to zero everywhere.
  */
-export async function aging(customerId: Id, now: Date = new Date()): Promise<AgingDTO> {
+export async function aging(shopId: string, customerId: Id, now: Date = new Date()): Promise<AgingDTO> {
   const rows = await prisma.ledgerEntry.findMany({
-    where: { customerId },
+    where: { customerId, shopId },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { type: true, amount: true, createdAt: true },
   });
@@ -458,6 +467,7 @@ export async function recordPayment(
   ctx: LedgerCtx,
 ): Promise<LedgerPaymentDTO> {
   requirePermission(ctx.session, "ledger.write");
+  const shopId = requireShop(ctx.session);
   const data = recordPaymentSchema.parse(input);
 
   const route = "POST /api/ledger/{id}/payments";
@@ -474,12 +484,13 @@ export async function recordPayment(
 
   try {
     return await runTx(async (tx) => {
-      const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { id: true } });
+      const customer = await tx.customer.findFirst({ where: { id: customerId, shopId }, select: { id: true } });
       if (!customer) throw new DomainError(`Customer ${customerId} not found`, "NOT_FOUND");
 
       const amountRupees = fromPaise(data.amount);
       const payment = await tx.payment.create({
         data: {
+          shopId,
           customerId,
           mode: data.mode,
           amount: money2(amountRupees),
@@ -488,7 +499,7 @@ export async function recordPayment(
         select: { id: true },
       });
 
-      const ledgerEntryId = await post(tx, customerId, "PAYMENT_CREDIT", amountRupees, {
+      const ledgerEntryId = await post(tx, shopId, customerId, "PAYMENT_CREDIT", amountRupees, {
         refType: "PAYMENT",
         refId: payment.id,
         note: data.note ?? null,
@@ -496,12 +507,13 @@ export async function recordPayment(
 
       // Outstanding after this credit (computed inside the tx for a consistent read).
       const agg = await tx.ledgerEntry.aggregate({
-        where: { customerId },
+        where: { customerId, shopId },
         _sum: { amount: true },
       });
       const outstandingAfter = toPaise(agg._sum.amount ?? new Decimal(0));
 
       await audit(tx, {
+        shopId,
         ...auditMeta(ctx.session),
         permissionUsed: "ledger.write",
         action: "ledger.payment",
@@ -570,20 +582,22 @@ export async function triggerReminder(
   ctx: LedgerCtx,
 ): Promise<ReminderResult> {
   requirePermission(ctx.session, "ledger.write");
+  const shopId = requireShop(ctx.session);
   const data = triggerReminderSchema.parse(input);
 
   return await runTx(async (tx) => {
-    const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { id: true } });
+    const customer = await tx.customer.findFirst({ where: { id: customerId, shopId }, select: { id: true } });
     if (!customer) throw new DomainError(`Customer ${customerId} not found`, "NOT_FOUND");
 
     const agg = await tx.ledgerEntry.aggregate({
-      where: { customerId },
+      where: { customerId, shopId },
       _sum: { amount: true },
     });
     const owed = toPaise(agg._sum.amount ?? new Decimal(0));
     const queued = owed > 0;
 
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "ledger.write",
       action: "ledger.reminder",

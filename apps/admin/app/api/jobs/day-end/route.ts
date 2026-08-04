@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { runDayEndRollup } from "@hardware/core";
+import { listActiveShops, runDayEndRollup } from "@hardware/core";
 import { authorizeCron } from "../../../../lib/cron";
 import { serverLogger, requestId } from "../../../../lib/logger";
 
@@ -14,9 +14,14 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: { code: "UNAUTHORIZED", message: auth.reason } }, { status: 401 });
   }
   try {
-    const result = await runDayEndRollup();
-    log.info("job day-end", { date: result.summary.date, grandTotal: result.summary.grandTotal, requestId: rid });
-    return NextResponse.json({ ...result, authDeferred: auth.deferred });
+    // Per-tenant roll-up: one summary per shop (17). Trivial while a single shop exists.
+    const shops = await listActiveShops();
+    const perShop = [];
+    for (const shop of shops) {
+      perShop.push({ shopId: shop.id, ...(await runDayEndRollup(shop.id)) });
+    }
+    log.info("job day-end", { shops: shops.length, requestId: rid });
+    return NextResponse.json({ shops: perShop, authDeferred: auth.deferred });
   } catch (e) {
     log.error("job day-end failed", { err: String(e), requestId: rid });
     return NextResponse.json({ error: { code: "INTERNAL", message: "Retry." } }, { status: 500 });

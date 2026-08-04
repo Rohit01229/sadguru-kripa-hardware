@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { priceCart, priceCartSchema } from "@hardware/core";
-import { getCustomerSession } from "../../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../../lib/session";
 import { requestId } from "../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../lib/http";
 
@@ -13,9 +13,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await getCustomerSession();
     if (!session || !session.customerId) return unauthenticated(rid);
+    const shopId = await storefrontShopId();
     const body = await req.json().catch(() => null);
     const input = priceCartSchema.parse(body);
-    const summary = await priceCart(session.customerId, input);
+    const summary = await priceCart(shopId, session.customerId, input);
     return NextResponse.json(summary);
   } catch (e) {
     return errorResponse(e, rid);

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { deleteAddress } from "@hardware/core";
-import { getCustomerSession } from "../../../../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../../../../lib/session";
 import { requestId } from "../../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../../lib/http";
 
@@ -14,8 +14,9 @@ export async function DELETE(
   try {
     const session = await getCustomerSession();
     if (!session || !session.customerId) return unauthenticated(rid);
+    const shopId = await storefrontShopId();
     const { id } = await params;
-    await deleteAddress(session.customerId, id);
+    await deleteAddress(shopId, session.customerId, id);
     return new NextResponse(null, { status: 204 });
   } catch (e) {
     return errorResponse(e, rid);

@@ -15,7 +15,7 @@ import {
   formatMoney,
   formatQty,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { ReportsNav, Forbid } from "../nav";
 import { Gstr1PeriodFilter } from "./Gstr1PeriodFilter";
 
@@ -43,7 +43,8 @@ export default async function Gstr1Page({
 
   const sp = await searchParams;
   const period = sp.period && /^\d{4}-\d{2}$/.test(sp.period) ? sp.period : currentPeriod();
-  const report = await gstr1({ period });
+  const shopId = await requireShopId();
+  const report = await gstr1(shopId, { period });
   const t = await getTranslations("reports");
 
   return (

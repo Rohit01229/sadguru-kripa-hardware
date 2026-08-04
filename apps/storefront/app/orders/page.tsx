@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { listMyOrders } from "@hardware/core";
 import { Badge, Button, Card, EmptyState, PageHeader, formatDateTime, formatMoney } from "@hardware/ui";
-import { getCustomerSession } from "../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../lib/session";
 import { orderStatusLabel, orderStatusVariant } from "../../lib/order-status";
 import { OrderFilters, type OrderFilterValues } from "./OrderFilters";
 
@@ -41,6 +41,7 @@ export default async function OrdersPage({
   const session = await getCustomerSession();
   if (!session || !session.customerId) redirect("/account");
 
+  const shopId = await storefrontShopId();
   const t = await getTranslations("orders");
 
   const sp = await searchParams;
@@ -57,7 +58,7 @@ export default async function OrdersPage({
   };
   const isFiltered = Boolean(status || from || toDate);
 
-  const page = await listMyOrders(session.customerId, {
+  const page = await listMyOrders(shopId, session.customerId, {
     status: status as never,
     from,
     to,

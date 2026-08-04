@@ -68,7 +68,7 @@ function makeTx(PrismaDecimal: typeof DecimalModule.default) {
         orderRow = { ...orderRow, ...data };
         return orderRow;
       }),
-      findUnique: vi.fn(async () => ({
+      findFirst: vi.fn(async () => ({
         ...orderRow,
         id: "ord_1",
         orderNo: "ORD-X",
@@ -94,7 +94,7 @@ function makeTx(PrismaDecimal: typeof DecimalModule.default) {
       }),
     },
     customer: { update: vi.fn(async () => ({})) },
-    invoice: { findUnique: vi.fn(async () => null) },
+    invoice: { findFirst: vi.fn(async () => null) },
     auditLog: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         rec("auditLog.create", data);
@@ -140,6 +140,7 @@ const ctx = {
   session: {
     userId: "acct_1",
     customerId: "cust_1",
+    shopId: "shop_test",
     realm: "CUSTOMER" as const,
     roles: ["CUSTOMER"],
     permissions: ["orders.place"],
@@ -179,8 +180,12 @@ describe("orders.placeOrder — totals + reservation (04 §8.5)", () => {
     // One reservation per line (2 lines).
     expect(calls["reservation.create"]).toHaveLength(2);
     // PENDING_PAYMENT for a RAZORPAY order.
-    const created = calls["order.create"]![0] as { status: string };
+    const created = calls["order.create"]![0] as { status: string; shopId: string };
     expect(created.status).toBe("PENDING_PAYMENT");
+    // Every write is stamped with the caller's shop (17 — multi-tenancy).
+    expect(created.shopId).toBe("shop_test");
+    const rsv = calls["reservation.create"]![0] as { shopId: string };
+    expect(rsv.shopId).toBe("shop_test");
     expect(dto.id).toBe("ord_1");
   });
 

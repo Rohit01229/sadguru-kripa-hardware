@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   finalizePakka,
   listInvoices,
+  requireShop,
   requirePermission,
   finalizePakkaSchema,
   listInvoicesQuerySchema,
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "bill.read");
+    const shopId = requireShop(session);
 
     const sp = req.nextUrl.searchParams;
     const query = listInvoicesQuerySchema.parse({
@@ -49,7 +51,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       cursor: sp.get("cursor") ?? undefined,
       limit: sp.get("limit") ? Number(sp.get("limit")) : undefined,
     });
-    const page = await listInvoices(query);
+    const page = await listInvoices(shopId, query);
     return NextResponse.json(page);
   } catch (e) {
     return errorResponse(e, rid);

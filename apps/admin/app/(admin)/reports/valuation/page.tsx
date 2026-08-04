@@ -14,7 +14,7 @@ import {
   formatMoney,
   formatQty,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { ReportsNav, Forbid } from "../nav";
 import { ValuationFilter } from "./ValuationFilter";
 
@@ -36,7 +36,8 @@ export default async function ValuationPage({
 
   const sp = await searchParams;
   const inStockOnly = sp.inStockOnly === "true";
-  const report = await stockValuation({ inStockOnly });
+  const shopId = await requireShopId();
+  const report = await stockValuation(shopId, { inStockOnly });
   const t = await getTranslations("reports");
 
   return (

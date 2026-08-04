@@ -52,7 +52,7 @@ describe("ledger.aging — 0-30 / 31-60 / 60+ FIFO buckets", () => {
       { type: "INVOICE_DEBIT", amount: D("200"), createdAt: daysAgo(45) }, // 31-60
       { type: "INVOICE_DEBIT", amount: D("300"), createdAt: daysAgo(90) }, // 60+
     ];
-    const a = await aging("cust_1");
+    const a = await aging("shop_1", "cust_1");
     expect(a.bucket0to30).toBe(10000);
     expect(a.bucket31to60).toBe(20000);
     expect(a.bucket60plus).toBe(30000);
@@ -67,7 +67,7 @@ describe("ledger.aging — 0-30 / 31-60 / 60+ FIFO buckets", () => {
       { type: "INVOICE_DEBIT", amount: D("100"), createdAt: daysAgo(5) },
       { type: "PAYMENT_CREDIT", amount: D("-300"), createdAt: daysAgo(1) },
     ];
-    const a = await aging("cust_1");
+    const a = await aging("shop_1", "cust_1");
     expect(a.bucket60plus).toBe(0);
     expect(a.bucket0to30).toBe(10000);
     expect(a.outstanding).toBe(10000);
@@ -78,7 +78,7 @@ describe("ledger.aging — 0-30 / 31-60 / 60+ FIFO buckets", () => {
       { type: "INVOICE_DEBIT", amount: D("500"), createdAt: daysAgo(70) }, // 60+
       { type: "PAYMENT_CREDIT", amount: D("-200"), createdAt: daysAgo(1) },
     ];
-    const a = await aging("cust_1");
+    const a = await aging("shop_1", "cust_1");
     expect(a.bucket60plus).toBe(30000); // 300 remains, still 60+
     expect(a.outstanding).toBe(30000);
   });
@@ -88,7 +88,7 @@ describe("ledger.aging — 0-30 / 31-60 / 60+ FIFO buckets", () => {
       { type: "INVOICE_DEBIT", amount: D("100"), createdAt: daysAgo(10) },
       { type: "PAYMENT_CREDIT", amount: D("-150"), createdAt: daysAgo(1) },
     ];
-    const a = await aging("cust_1");
+    const a = await aging("shop_1", "cust_1");
     expect(a.bucket0to30).toBe(0);
     expect(a.bucket31to60).toBe(0);
     expect(a.bucket60plus).toBe(0);
@@ -101,7 +101,7 @@ describe("ledger.aging — 0-30 / 31-60 / 60+ FIFO buckets", () => {
       { type: "INVOICE_DEBIT", amount: D("100"), createdAt: daysAgo(2) },
       { type: "CREDIT_NOTE_CREDIT", amount: D("-400"), createdAt: daysAgo(1) },
     ];
-    const a = await aging("cust_1");
+    const a = await aging("shop_1", "cust_1");
     expect(a.bucket60plus).toBe(0);
     expect(a.bucket0to30).toBe(10000);
   });
@@ -113,6 +113,6 @@ describe("ledger.outstanding — signed sum", () => {
       { type: "INVOICE_DEBIT", amount: D("1000"), createdAt: daysAgo(5) },
       { type: "PAYMENT_CREDIT", amount: D("-250"), createdAt: daysAgo(1) },
     ];
-    expect(await outstanding("cust_1")).toBe(75000);
+    expect(await outstanding("shop_1", "cust_1")).toBe(75000);
   });
 });

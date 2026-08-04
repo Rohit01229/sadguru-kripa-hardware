@@ -40,5 +40,67 @@
     "notInitialised": "स्टोर कॉन्फ़िग सेट नहीं है — सीड चलाएँ।",
     "invalidInput": "अमान्य इनपुट।",
     "generic": "कुछ गड़बड़ हुई। कृपया दोबारा कोशिश करें।"
+  },
+  "billTheme": {
+    "title": "बिल थीम",
+    "breadcrumb": "बिल थीम",
+    "description": "अपने बिल का लुक चुनें। बदलाव तुरंत दिखेगा।",
+    "presets": "एक लुक से शुरू करें",
+    "look": "लुक",
+    "show": "क्या दिखे",
+    "wording": "आपके शब्द",
+    "preview": "लाइव प्रीव्यू",
+    "paper": "पेपर साइज़",
+    "previewNote": "नमूना डेटा — असली बिल भी इसी तरह छपेगा।",
+    "accent": "रंग",
+    "font": "फ़ॉन्ट",
+    "size": "टेक्स्ट आकार (pt)",
+    "density": "स्पेसिंग",
+    "borders": "टेबल लाइनें",
+    "headerAlign": "हेडर संरेखण",
+    "zebraRows": "एक छोड़ एक पंक्ति रंगीन",
+    "outerBorder": "बिल के चारों ओर बॉर्डर",
+    "showLogo": "दुकान का लोगो",
+    "showAddress": "दुकान का पता",
+    "showContact": "फोन नंबर",
+    "showHsnColumn": "HSN कॉलम (A4/A5)",
+    "showBankDetails": "बैंक विवरण",
+    "showTerms": "नियम व शर्तें",
+    "showSignature": "हस्ताक्षर ब्लॉक",
+    "showFooterNote": "फुटर नोट",
+    "lockedNote": "GSTIN, कर विवरण, शब्दों में राशि और बिल नंबर हमेशा दिखेंगे — ये कानूनन जरूरी हैं।",
+    "tagline": "टैगलाइन",
+    "taglinePlaceholder": "जैसे 1998 से भरोसेमंद",
+    "signatureLabel": "हस्ताक्षर लेबल",
+    "footerNote": "फुटर नोट",
+    "tokensHint": "आप {{shop.name}}, {{invoice.no}} या {{customer.name}} लिख सकते हैं।",
+    "save": "थीम सहेजें",
+    "saved": "बिल थीम सहेजी गई।",
+    "accentOption": {
+      "espresso": "एस्प्रेसो",
+      "amber": "एम्बर",
+      "kraft": "क्राफ्ट",
+      "ink": "स्याही",
+      "none": "काला"
+    },
+    "fontOption": {
+      "sans": "सान्स",
+      "serif": "सेरिफ",
+      "mono": "मोनो"
+    },
+    "densityOption": {
+      "compact": "संक्षिप्त",
+      "comfortable": "आरामदायक"
+    },
+    "bordersOption": {
+      "ruled": "लाइनदार",
+      "minimal": "न्यूनतम",
+      "boxed": "बॉक्स"
+    },
+    "alignOption": {
+      "left": "बाएँ",
+      "center": "मध्य"
+    },
+    "open": "बदलें"
   }
 }

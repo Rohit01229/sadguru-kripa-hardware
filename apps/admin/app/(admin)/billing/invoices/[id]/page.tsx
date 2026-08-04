@@ -3,7 +3,11 @@ import { getTranslations } from "next-intl/server";
 import {
   getInvoice,
   getStoreConfig,
+  getBillTheme,
   getProduct,
+  getCustomer,
+  assessEwayBill,
+  ewayValidityDays,
   listCreditNotesForInvoice,
   requirePermission,
   can,
@@ -23,9 +27,11 @@ import {
   formatMoney,
   formatDate,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../../lib/session";
 import { BillingNav, Forbid } from "../../nav";
+import { buildWhatsAppUrl } from "../../share";
 import { ReprintClient } from "./ReprintClient";
+import { EwayBillCard } from "./eway/EwayBillCard";
 import { InvoiceActions, type LineLabel } from "./InvoiceActions";
 
 // Invoice detail (S4 reprint + S5 corrections). Renders the saved pakka invoice with
@@ -43,17 +49,19 @@ export default async function InvoiceReprintPage({ params }: { params: Promise<{
   }
 
   const t = await getTranslations("billing");
+  const shopId = await requireShopId();
   const { id } = await params;
-  const [invoice, store, creditNotes] = await Promise.all([
-    getInvoice(id),
-    getStoreConfig(),
-    listCreditNotesForInvoice(id),
+  const [invoice, store, creditNotes, billTheme] = await Promise.all([
+    getInvoice(shopId, id),
+    getStoreConfig(shopId),
+    listCreditNotesForInvoice(shopId, id),
+    getBillTheme(shopId),
   ]);
   if (!invoice) notFound();
 
   // Resolve human labels for the credit-note line picker (product + sale-unit names).
   const productIds = [...new Set(invoice.lines.map((l) => l.productId))];
-  const products = await Promise.all(productIds.map((pid) => getProduct(pid)));
+  const products = await Promise.all(productIds.map((pid) => getProduct(shopId, pid)));
   const productMap = new Map(products.filter(Boolean).map((p) => [p!.id, p!]));
   const lineLabels: LineLabel[] = invoice.lines.map((l) => {
     const p = productMap.get(l.productId);
@@ -62,6 +70,17 @@ export default async function InvoiceReprintPage({ params }: { params: Promise<{
     const unit = su?.unitName ?? su?.unitCode ?? l.saleUnitId;
     return { productId: l.productId, saleUnitId: l.saleUnitId, label: `${name} — ${unit}`, saleQty: l.saleQty };
   });
+
+  // The party's phone, so "Send on WhatsApp" opens their chat directly. A walk-in bill
+  // has no customer — WhatsApp then asks the operator to pick a contact, which is right.
+  const billedTo =
+    invoice.customerId && can(session, "customers.read")
+      ? await getCustomer(shopId, invoice.customerId)
+      : null;
+
+  // e-Way bill (doc 20 §7) — needed for consignments above the state threshold, at any
+  // turnover. Assessment is read-only, so it is safe to run on every view.
+  const eway = await assessEwayBill(shopId, id);
 
   const canCancel = can(session, "bill.cancel");
   const canCredit = can(session, "bill.creditnote.create");
@@ -120,18 +139,54 @@ export default async function InvoiceReprintPage({ params }: { params: Promise<{
         </Card>
       )}
 
+      <EwayBillCard
+        invoiceId={id}
+        assessment={eway}
+        validityDays={ewayValidityDays(eway.existing?.distanceKm ?? null, eway.existing?.overDimensional ?? false)}
+      />
+
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">{t("detail.reprintHeading")}</h2>
-          {/* Server-generated A4 PDF (react-pdf). Opens in a new tab; save/print/email from there. */}
-          <Button asChild variant="outline" size="sm">
-            <a href={`/api/billing/invoices/${id}/pdf`} target="_blank" rel="noopener noreferrer">
-              Download PDF
-            </a>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Re-send an old bill on WhatsApp — the commonest "can you send that again?"
+                request at a counter (19 §5). */}
+            <Button asChild size="sm">
+              <a
+                href={buildWhatsAppUrl(
+                  {
+                    invoiceNo: invoice.invoiceNo,
+                    grandTotal: invoice.grandTotal,
+                    date: invoice.date,
+                    lines: invoice.lines.map((l) => ({
+                      name:
+                        lineLabels.find(
+                          (x) => x.productId === l.productId && x.saleUnitId === l.saleUnitId,
+                        )?.label ?? l.productId.slice(0, 8),
+                      qty: l.saleQty,
+                      amount: l.taxableValue + l.cgst + l.sgst + l.igst,
+                    })),
+                  },
+                  store?.name ?? "My Hardware Store",
+                  billedTo?.phone ?? null,
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("pos.sendWhatsApp")}
+              </a>
+            </Button>
+            {/* Server-generated A4 PDF (react-pdf). Opens in a new tab; save/print/email from there. */}
+            <Button asChild variant="outline" size="sm">
+              <a href={`/api/billing/invoices/${id}/pdf`} target="_blank" rel="noopener noreferrer">
+                {t("pos.downloadPdf")}
+              </a>
+            </Button>
+          </div>
         </div>
         <ReprintClient
           invoice={invoice}
+          theme={billTheme}
           store={{
             name: store?.name ?? "My Hardware Store",
             address: store?.address ?? null,

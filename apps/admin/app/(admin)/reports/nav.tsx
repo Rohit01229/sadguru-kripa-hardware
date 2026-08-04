@@ -13,6 +13,10 @@ export async function ReportsNav({ active }: { active: string }) {
   const items: { href: string; label: string; key: string }[] = [
     { href: "/reports", label: t("nav.dayEnd"), key: "day-end" },
     { href: "/reports/sales", label: t("nav.sales"), key: "sales" },
+    { href: "/reports/purchases", label: t("nav.purchases"), key: "purchases" },
+    { href: "/reports/receivables", label: t("nav.receivables"), key: "receivables" },
+    { href: "/reports/collections", label: t("nav.collections"), key: "collections" },
+    { href: "/reports/returns", label: t("nav.returns"), key: "returns" },
     { href: "/reports/gstr1", label: t("nav.gstr1"), key: "gstr1" },
     { href: "/reports/valuation", label: t("nav.valuation"), key: "valuation" },
   ];

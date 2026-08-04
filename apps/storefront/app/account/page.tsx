@@ -1,7 +1,7 @@
 import { getProfile } from "@hardware/core";
 import { Button, PageHeader } from "@hardware/ui";
 import { getTranslations } from "next-intl/server";
-import { getCustomerSession } from "../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../lib/session";
 import { AccountClient } from "./AccountClient";
 import { AuthForms } from "./AuthForms";
 import { logoutAction } from "./actions";
@@ -22,7 +22,8 @@ export default async function AccountPage() {
     );
   }
 
-  const profile = await getProfile(session.customerId);
+  const shopId = await storefrontShopId();
+  const profile = await getProfile(shopId, session.customerId);
   if (!profile) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">

@@ -40,5 +40,67 @@
     "notInitialised": "Store config not initialised — run the seed.",
     "invalidInput": "Invalid input.",
     "generic": "Something went wrong. Please try again."
+  },
+  "billTheme": {
+    "title": "Bill theme",
+    "breadcrumb": "Bill theme",
+    "description": "Choose how your printed bills and PDFs look. Changes preview instantly.",
+    "presets": "Start from a look",
+    "look": "Look",
+    "show": "What appears",
+    "wording": "Your wording",
+    "preview": "Live preview",
+    "paper": "Paper size",
+    "previewNote": "Sample data — this is the same component that prints your real bills.",
+    "accent": "Accent colour",
+    "font": "Font",
+    "size": "Text size (pt)",
+    "density": "Spacing",
+    "borders": "Table lines",
+    "headerAlign": "Header alignment",
+    "zebraRows": "Shade alternate rows",
+    "outerBorder": "Border around the bill",
+    "showLogo": "Shop logo",
+    "showAddress": "Shop address",
+    "showContact": "Phone number",
+    "showHsnColumn": "HSN column (A4/A5)",
+    "showBankDetails": "Bank details",
+    "showTerms": "Terms & conditions",
+    "showSignature": "Signature block",
+    "showFooterNote": "Footer note",
+    "lockedNote": "GSTIN, tax breakup, amount in words and the invoice number always appear — they are required on a tax invoice.",
+    "tagline": "Tagline",
+    "taglinePlaceholder": "e.g. Quality hardware since 1998",
+    "signatureLabel": "Signature label",
+    "footerNote": "Footer note",
+    "tokensHint": "You can use {{shop.name}}, {{invoice.no}} or {{customer.name}}.",
+    "save": "Save theme",
+    "saved": "Bill theme saved.",
+    "accentOption": {
+      "espresso": "Espresso",
+      "amber": "Amber",
+      "kraft": "Kraft",
+      "ink": "Ink",
+      "none": "Black"
+    },
+    "fontOption": {
+      "sans": "Sans",
+      "serif": "Serif",
+      "mono": "Monospace"
+    },
+    "densityOption": {
+      "compact": "Compact",
+      "comfortable": "Comfortable"
+    },
+    "bordersOption": {
+      "ruled": "Ruled",
+      "minimal": "Minimal",
+      "boxed": "Boxed"
+    },
+    "alignOption": {
+      "left": "Left",
+      "center": "Centre"
+    },
+    "open": "Customise"
   }
 }

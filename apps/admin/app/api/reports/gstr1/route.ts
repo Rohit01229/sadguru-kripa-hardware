@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { gstr1, gstr1Csv, requirePermission, gstr1QuerySchema } from "@hardware/core";
+import { gstr1, gstr1Csv, requireShop, requirePermission, gstr1QuerySchema } from "@hardware/core";
 import { getStaffSession } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
@@ -14,6 +14,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "reports.export");
+    const shopId = requireShop(session);
 
     const sp = req.nextUrl.searchParams;
     const query = gstr1QuerySchema.parse({
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
 
     if (query.format === "csv") {
-      const csv = await gstr1Csv(query);
+      const csv = await gstr1Csv(shopId, query);
       return new NextResponse(csv, {
         status: 200,
         headers: {
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       });
     }
 
-    const report = await gstr1(query);
+    const report = await gstr1(shopId, query);
     return NextResponse.json(report);
   } catch (e) {
     return errorResponse(e, rid);

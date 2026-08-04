@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Input, Label, SearchIcon, XIcon, Spinner, cn } from "@hardware/ui";
+import { Button, Input, Label, SearchIcon, XIcon, Spinner, cn } from "@hardware/ui";
+import { quickCreateCustomerAction } from "./actions";
 import type { PosCustomer } from "./PosClient";
 
 /**
@@ -27,11 +28,37 @@ export function PosCustomerPicker({
   onSelect: (customer: PosCustomer | null) => void;
 }) {
   const t = useTranslations("billing");
+  const tCommon = useTranslations("common");
   const [query, setQuery] = useState(value?.name ?? "");
   const [results, setResults] = useState<PosCustomer[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(-1);
+
+  // Inline "add new party" (19 §6).
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  async function saveNew() {
+    const name = newName.trim();
+    if (!name) {
+      setCreateError(t("customerPicker.nameRequired"));
+      return;
+    }
+    setSaving(true);
+    setCreateError(null);
+    const res = await quickCreateCustomerAction(name, newPhone);
+    setSaving(false);
+    if (res.customer) {
+      setCreating(false);
+      pick(res.customer);
+    } else {
+      setCreateError(res.error ?? t("customerPicker.createFailed"));
+    }
+  }
 
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -185,7 +212,58 @@ export function PosCustomerPicker({
                 <Spinner className="h-4 w-4" /> {t("customerPicker.searching")}
               </li>
             ) : results.length === 0 ? (
-              <li className="px-3 py-2 text-sm text-muted-foreground">{t("customerPicker.noMatch")}</li>
+              <li className="px-3 py-2">
+                <p className="text-sm text-muted-foreground">{t("customerPicker.noMatch")}</p>
+                {/* Create the party without leaving the bill (19 §6). A khata sale to a
+                    walk-in who has just become a regular is the whole reason this exists. */}
+                {creating ? (
+                  <div className="mt-2 space-y-2">
+                    <Input
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder={t("customerPicker.newNamePlaceholder")}
+                      autoFocus
+                      onKeyDown={(e) => e.stopPropagation()}
+                    />
+                    <Input
+                      value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value)}
+                      placeholder={t("customerPicker.newPhonePlaceholder")}
+                      inputMode="tel"
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void saveNew();
+                        }
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" onClick={() => void saveNew()} isLoading={saving}>
+                        {t("customerPicker.saveNew")}
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setCreating(false)}>
+                        {tCommon("actions.cancel")}
+                      </Button>
+                    </div>
+                    {createError && <p className="text-xs text-destructive">{createError}</p>}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewName(query.trim());
+                      setNewPhone("");
+                      setCreateError(null);
+                      setCreating(true);
+                    }}
+                    className="mt-1 flex min-h-[44px] w-full items-center gap-2 rounded px-1 text-left text-sm font-medium text-primary hover:underline sm:min-h-0"
+                  >
+                    <span aria-hidden="true">＋</span>
+                    {t("customerPicker.addNew", { name: query.trim() })}
+                  </button>
+                )}
+              </li>
             ) : (
               results.map((c, i) => (
                 <li key={c.id} role="option" id={optionId(i)} aria-selected={i === active}>

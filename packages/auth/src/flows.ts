@@ -52,6 +52,8 @@ export interface RegisterResult {
  * response (do not reveal whether the email already exists).
  */
 export async function registerCustomer(input: {
+  /** The shop whose storefront the customer is registering on (17 — multi-tenancy). */
+  shopId: string;
   email: string;
   password: string;
   name: string;
@@ -69,7 +71,7 @@ export async function registerCustomer(input: {
 
   const account = await prisma.$transaction(async (tx) => {
     const customer = await tx.customer.create({
-      data: { name: input.name, phone: input.phone ?? null },
+      data: { shopId: input.shopId, name: input.name, phone: input.phone ?? null },
     });
     const acct = await tx.customerAccount.create({
       data: { customerId: customer.id, email, passwordHash },

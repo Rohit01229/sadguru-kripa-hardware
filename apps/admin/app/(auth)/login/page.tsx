@@ -1,4 +1,4 @@
-import { getStoreConfig } from "@hardware/core";
+import { getPrimaryShopId, getStoreConfig } from "@hardware/core";
 import { LoginForm } from "./LoginForm";
 
 // Staff sign-in page. Server component so the heading can reflect the configurable
@@ -7,7 +7,8 @@ import { LoginForm } from "./LoginForm";
 export default async function LoginPage() {
   let storeName = "My Hardware Store";
   try {
-    const config = await getStoreConfig();
+    const shopId = await getPrimaryShopId();
+    const config = shopId ? await getStoreConfig(shopId) : null;
     if (config?.name) storeName = config.name;
   } catch {
     // StoreConfig unavailable — keep the fallback heading.

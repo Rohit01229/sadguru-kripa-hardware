@@ -43,7 +43,7 @@ vi.mock("../shared/db", async () => {
     prisma: {
       customer: {
         findMany: vi.fn(async () => customers),
-        findUnique: vi.fn(async (args: { where: { id: string } }) => {
+        findFirst: vi.fn(async (args: { where: { id: string } }) => {
           const c = customers.find((x) => x.id === args.where.id);
           return c ? { id: c.id, name: c.name } : null;
         }),
@@ -100,14 +100,14 @@ describe("ledger.listCustomers — additive filters", () => {
   });
 
   it("returns ALL customers (with full cursor pagination) when no filter is passed", async () => {
-    const page = await listCustomers({});
+    const page = await listCustomers("shop_1", {});
     expect(page.data.map((c) => c.id).sort()).toEqual(["c_clear", "c_credit", "c_owes"]);
     // Default (non-derived) path keeps a real pageInfo shape.
     expect(page.pageInfo).toHaveProperty("nextCursor");
   });
 
   it("hasOutstanding keeps only customers whose net balance > 0", async () => {
-    const page = await listCustomers({ hasOutstanding: true });
+    const page = await listCustomers("shop_1", { hasOutstanding: true });
     expect(page.data.map((c) => c.id)).toEqual(["c_owes"]);
     // The matched DTO carries the computed outstanding (paise).
     expect(page.data[0]!.outstanding).toBe(100000);
@@ -116,12 +116,12 @@ describe("ledger.listCustomers — additive filters", () => {
   });
 
   it("agingBucket=current selects customers with fresh (0-30d) unpaid debt", async () => {
-    const page = await listCustomers({ agingBucket: "current" });
+    const page = await listCustomers("shop_1", { agingBucket: "current" });
     expect(page.data.map((c) => c.id)).toEqual(["c_owes"]);
   });
 
   it("agingBucket=b60plus excludes a customer whose debt is only recent", async () => {
-    const page = await listCustomers({ agingBucket: "b60plus" });
+    const page = await listCustomers("shop_1", { agingBucket: "b60plus" });
     expect(page.data).toEqual([]);
   });
 });
@@ -139,7 +139,7 @@ describe("ledger.getStatement — from/to window with carried opening balance", 
   });
 
   it("returns the whole ledger (opening 0) when no window is given", async () => {
-    const s = await getStatement("c1");
+    const s = await getStatement("shop_1", "c1");
     expect(s.entries).toHaveLength(3);
     expect(s.openingBalance).toBe(0);
     expect(s.outstanding).toBe(90000); // 1000 − 400 + 300 = 900
@@ -149,7 +149,7 @@ describe("ledger.getStatement — from/to window with carried opening balance", 
 
   it("folds entries before `from` into openingBalance, keeps running balance correct", async () => {
     const from = daysAgo(10).toISOString();
-    const s = await getStatement("c1", { from });
+    const s = await getStatement("shop_1", "c1", { from });
     // Only the 2-day-old debit is in-window; the first two fold into opening (600).
     expect(s.entries.map((e) => e.id)).toEqual(["e3"]);
     expect(s.openingBalance).toBe(60000); // 1000 − 400
@@ -160,7 +160,7 @@ describe("ledger.getStatement — from/to window with carried opening balance", 
 
   it("`to` excludes later entries from the rows but not from outstanding", async () => {
     const to = daysAgo(10).toISOString();
-    const s = await getStatement("c1", { to });
+    const s = await getStatement("shop_1", "c1", { to });
     expect(s.entries.map((e) => e.id)).toEqual(["e1", "e2"]); // e3 (2d ago) excluded
     expect(s.outstanding).toBe(90000); // still the full-ledger closing balance
   });

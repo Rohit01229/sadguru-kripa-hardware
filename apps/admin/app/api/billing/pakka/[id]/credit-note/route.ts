@@ -3,6 +3,7 @@ import {
   createCreditNote,
   listCreditNotesForInvoice,
   createCreditNoteSchema,
+  requireShop,
   requirePermission,
 } from "@hardware/core";
 import { getStaffSession } from "../../../../../../lib/session";
@@ -44,9 +45,10 @@ export async function GET(
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "bill.read");
+    const shopId = requireShop(session);
 
     const { id } = await params;
-    const notes = await listCreditNotesForInvoice(id);
+    const notes = await listCreditNotesForInvoice(shopId, id);
     return NextResponse.json({ data: notes });
   } catch (e) {
     return errorResponse(e, rid);

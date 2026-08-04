@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { runReservationExpiry } from "@hardware/core";
+import { listActiveShops, runReservationExpiry } from "@hardware/core";
 import { authorizeCron } from "../../../../lib/cron";
 import { serverLogger, requestId } from "../../../../lib/logger";
 
@@ -17,9 +17,15 @@ async function handle(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: { code: "UNAUTHORIZED", message: auth.reason } }, { status: 401 });
   }
   try {
-    const result = await runReservationExpiry();
-    log.info("job reservation-expiry", { released: result.released, deferred: auth.deferred, requestId: rid });
-    return NextResponse.json({ ...result, authDeferred: auth.deferred });
+    // Release expired reservations per shop (17) so each freed-stock act is audited to
+    // its own tenant. Trivial while a single shop exists.
+    const shops = await listActiveShops();
+    let released = 0;
+    for (const shop of shops) {
+      released += (await runReservationExpiry(shop.id)).released;
+    }
+    log.info("job reservation-expiry", { shops: shops.length, released, deferred: auth.deferred, requestId: rid });
+    return NextResponse.json({ released, shops: shops.length, authDeferred: auth.deferred });
   } catch (e) {
     // 500 so QStash retries (the job is idempotent → a safe retry).
     log.error("job reservation-expiry failed", { err: String(e), requestId: rid });

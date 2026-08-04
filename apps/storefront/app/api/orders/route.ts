@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import { placeOrder, listMyOrders, placeOrderSchema, listOrdersQuerySchema } from "@hardware/core";
 import { createAuthLimiter, checkLimit } from "@hardware/auth";
-import { getCustomerSession } from "../../../lib/session";
+import { getCustomerSession, storefrontShopId } from "../../../lib/session";
 import { requestId } from "../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../lib/http";
 
@@ -46,6 +46,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await getCustomerSession();
     if (!session || !session.customerId) return unauthenticated(rid);
+    const shopId = await storefrontShopId();
     const sp = req.nextUrl.searchParams;
     const query = listOrdersQuerySchema.parse({
       status: sp.get("status") ?? undefined,
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       cursor: sp.get("cursor") ?? undefined,
       limit: sp.get("limit") ? Number(sp.get("limit")) : undefined,
     });
-    const page = await listMyOrders(session.customerId, query);
+    const page = await listMyOrders(shopId, session.customerId, query);
     return NextResponse.json(page);
   } catch (e) {
     return errorResponse(e, rid);

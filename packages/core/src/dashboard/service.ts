@@ -41,7 +41,7 @@ export interface DashboardDTO {
  * inventory alert source. Dues sums every customer's POSITIVE net ledger balance.
  * Top items aggregate ACTIVE invoice lines over the last `windowDays` (default 30).
  */
-export async function getDashboard(now: Date = new Date(), windowDays = 30): Promise<DashboardDTO> {
+export async function getDashboard(shopId: string, now: Date = new Date(), windowDays = 30): Promise<DashboardDTO> {
   const today = now.toISOString().slice(0, 10);
   const windowStart = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
 
@@ -53,15 +53,16 @@ export async function getDashboard(now: Date = new Date(), windowDays = 30): Pro
   //  3. Dues — signed ledger grouped by customer; positives are receivables.
   //  4. Top items over the window — ACTIVE invoice lines aggregated by product.
   const [de, low, grouped, lineGroups] = await Promise.all([
-    dayEnd({ date: today }),
-    lowStock(50),
+    dayEnd(shopId, { date: today }),
+    lowStock(shopId, 50),
     prisma.ledgerEntry.groupBy({
       by: ["customerId"],
+      where: { shopId },
       _sum: { amount: true },
     }),
     prisma.invoiceLine.groupBy({
       by: ["productId"],
-      where: { invoice: { status: "ACTIVE", date: { gte: windowStart } } },
+      where: { shopId, invoice: { status: "ACTIVE", date: { gte: windowStart } } },
       _sum: { baseQty: true, taxableValue: true, cgst: true, sgst: true, igst: true },
       _count: { _all: true },
     }),
@@ -90,7 +91,7 @@ export async function getDashboard(now: Date = new Date(), windowDays = 30): Pro
     .slice(0, 8);
 
   const products = await prisma.product.findMany({
-    where: { id: { in: ranked.map((r) => r.productId) } },
+    where: { id: { in: ranked.map((r) => r.productId) }, shopId },
     select: { id: true, name: true, sku: true },
   });
   const pmap = new Map(products.map((p) => [p.id, p]));

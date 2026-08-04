@@ -13,7 +13,7 @@ import {
   EmptyState,
   formatMoney,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { ReportsNav, Forbid } from "./nav";
 import { DayEndFilter } from "./DayEndFilter";
 
@@ -35,7 +35,8 @@ export default async function DayEndReportPage({
   }
 
   const sp = await searchParams;
-  const summary = await dayEnd({ date: sp.date });
+  const shopId = await requireShopId();
+  const summary = await dayEnd(shopId, { date: sp.date });
   const t = await getTranslations("reports");
 
   return (

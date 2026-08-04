@@ -48,13 +48,32 @@ export const saleUnitInputSchema = z.object({
 });
 export type SaleUnitInput = z.infer<typeof saleUnitInputSchema>;
 
+/**
+ * Create a product. Two entry modes share ONE schema (myBillBook-simple parity):
+ *
+ *  - SIMPLE — name + `salePrice` (+ the pre-filled `gstRatePct`) is enough. `sku`,
+ *    `categoryId` and `baseUnitId` are optional and the service fills them: an
+ *    auto-generated per-shop SKU, and the shop's default category/unit (seeded on
+ *    demand — see ./defaults). An empty `saleUnits` makes the service synthesise one
+ *    sale unit at the base unit, factor 1, priced at `salePrice`.
+ *  - FULL — the original shape (explicit sku/category/base unit + N sale units) still
+ *    parses and behaves EXACTLY as before; nothing was removed, only relaxed.
+ *
+ * `gstRatePct` stays required: the form always sends it, pre-filled from the shop's
+ * last-used rate (see catalog service `getLastUsedGstRate`).
+ */
 export const createProductSchema = z.object({
-  sku: z.string().trim().min(1).max(64),
+  /** Omit to auto-generate a per-shop SKU from the name (e.g. "ULTRAT-0001"). */
+  sku: z.string().trim().min(1).max(64).optional(),
   name: z.string().trim().min(1).max(200),
   brandId: z.string().min(1).optional().nullable(),
-  categoryId: z.string().min(1),
+  /** Omit to use the shop's default ("General") category. */
+  categoryId: z.string().min(1).optional(),
   hsnCode: z.string().trim().max(12).optional().nullable(),
-  baseUnitId: z.string().min(1),
+  /** Scanned EAN/UPC or a shop-printed label. Not unique — two items may share one. */
+  barcode: z.string().trim().max(64).optional().nullable(),
+  /** Omit to use the shop's default unit (PCS). */
+  baseUnitId: z.string().min(1).optional(),
   costPerBaseUnit: paise.default(0),
   gstRatePct,
   priceInclusive: z.boolean().optional().default(false),
@@ -64,8 +83,25 @@ export const createProductSchema = z.object({
   availableOnline: z.boolean().optional().default(true),
   /** Cloudinary image URLs (0–8). Optional; defaults to none. */
   imageKeys: imageKeys.optional().default([]),
-  /** At least one sale unit; the base unit is usually also a sale unit (factor 1). */
-  saleUnits: z.array(saleUnitInputSchema).min(1),
+  /**
+   * SIMPLE-mode price (paise) for the single auto-created sale unit. Required by the
+   * SERVICE (not by Zod) when `saleUnits` is empty — Zod cannot express "one of these
+   * two" without breaking the FULL-mode callers that never send it.
+   */
+  salePrice: paise.optional(),
+  /** Opening on-hand in BASE units, seeded as an ADJUST_IN movement on create. */
+  openingStock: decimalString.optional(),
+  /**
+   * Bulk/wholesale rate (paise per sale unit) that replaces `salePrice` once the billed
+   * quantity reaches `wholesaleMinQty`. Stored as ONE PriceSlab on the default sale
+   * unit, so the existing (tested) pricing resolver applies it at billing time with no
+   * billing change. Both fields must be present — a lone one is ignored, never an error.
+   */
+  wholesalePrice: paise.optional(),
+  /** Quantity (in the default sale unit) at/above which `wholesalePrice` applies. */
+  wholesaleMinQty: decimalString.optional(),
+  /** Sale units (factor + price + MRP each). Omit for SIMPLE mode — see `salePrice`. */
+  saleUnits: z.array(saleUnitInputSchema).optional().default([]),
 });
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 
@@ -74,6 +110,8 @@ export const updateProductSchema = z.object({
   brandId: z.string().min(1).nullable().optional(),
   categoryId: z.string().min(1).optional(),
   hsnCode: z.string().trim().max(12).nullable().optional(),
+  /** Scanned EAN/UPC or a shop-printed label (null clears it). */
+  barcode: z.string().trim().max(64).nullable().optional(),
   costPerBaseUnit: paise.optional(),
   gstRatePct: gstRatePct.optional(),
   priceInclusive: z.boolean().optional(),
@@ -185,21 +223,57 @@ export type UpsertUnitInput = z.infer<typeof upsertUnitSchema>;
 // ─────────────────── CSV import ───────────────────
 // One catalog-import row. Prices are paise; qty/factor are decimal strings.
 // `openingStock` is base-unit on-hand to seed (S2 synchronous; S3 owns real GRN).
+/**
+ * Money AS TYPED IN A SPREADSHEET. Import is the one boundary where the paise-on-the-
+ * wire rule (04 §2) actively hurts: a shopkeeper exporting from Excel/Tally has a
+ * column of rupees ("250", "250.50", "₹1,250"), and asking them to multiply every cell
+ * by 100 was the single most spreadsheet-hostile thing about the old importer.
+ * So: accept rupees here and convert to paise once, at the edge.
+ */
+const rupeesToPaise = z
+  .union([z.string(), z.number()])
+  .transform((v, ctx) => {
+    const cleaned = String(v).replace(/[₹,\s]/g, "").trim();
+    if (cleaned === "") return undefined;
+    const n = Number(cleaned);
+    if (!Number.isFinite(n) || n < 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "must be a non-negative amount in rupees" });
+      return z.NEVER;
+    }
+    // Round rather than truncate: 0.1+0.2 style float error must not lose a paisa.
+    return Math.round(n * 100);
+  });
+
+/**
+ * ONE row of a catalog import (19 §9). Mirrors the quick "New Item" form, not the full
+ * product form: **Item Name + Selling Price is a complete row.** Everything else is
+ * optional, and the service back-fills it exactly as the form does (auto item code,
+ * default unit/category). That is what makes a Tally/Vyapar/own-spreadsheet export
+ * usable without editing it first.
+ */
 export const importRowSchema = z.object({
-  sku: z.string().trim().min(1),
+  /** Omit to auto-generate a per-shop item code from the name. */
+  sku: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1),
-  category: z.string().trim().min(1),
+  /** Omit to file under the shop's default ("General") category. */
+  category: z.string().trim().min(1).optional(),
   brand: z.string().trim().optional(),
   hsnCode: z.string().trim().optional(),
-  gstRatePct,
-  baseUnitCode: z.string().trim().min(1),
+  barcode: z.string().trim().max(64).optional(),
+  /** Omit to inherit the shop's last-used GST rate (resolved by the service). */
+  gstRatePct: gstRatePct.optional(),
+  /** Omit to use the shop's default unit (PCS). */
+  baseUnitCode: z.string().trim().min(1).optional(),
   baseUnitKind: z.enum(["MEASURED", "PIECE"]).optional(),
-  saleUnitCode: z.string().trim().min(1),
+  saleUnitCode: z.string().trim().min(1).optional(),
   saleUnitKind: z.enum(["MEASURED", "PIECE"]).optional(),
-  factorToBase: positiveDecimalString,
-  salePrice: paise,
-  mrp: paise.optional().nullable(),
-  costPerBaseUnit: paise.optional().default(0),
+  factorToBase: positiveDecimalString.optional(),
+  /** Rupees in the sheet → paise after parse. */
+  salePrice: rupeesToPaise.pipe(paise),
+  mrp: rupeesToPaise.pipe(paise.optional()).optional(),
+  costPerBaseUnit: rupeesToPaise.pipe(paise.optional()).optional(),
+  wholesalePrice: rupeesToPaise.pipe(paise.optional()).optional(),
+  wholesaleMinQty: positiveDecimalString.optional(),
   priceInclusive: z.boolean().optional().default(false),
   openingStock: decimalString.optional(),
 });

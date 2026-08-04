@@ -112,7 +112,7 @@ export function ImportClient() {
           ref={inputRef}
           type="file"
           name="file"
-          accept=".csv,text/csv"
+          accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           className="sr-only"
           onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
         />

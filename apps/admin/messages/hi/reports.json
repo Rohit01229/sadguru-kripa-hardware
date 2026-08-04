@@ -4,7 +4,11 @@
     "dayEnd": "दिन-अंत",
     "sales": "बिक्री",
     "gstr1": "GSTR-1",
-    "valuation": "स्टॉक मूल्यांकन"
+    "valuation": "स्टॉक मूल्यांकन",
+    "purchases": "खरीद",
+    "receivables": "बकाया",
+    "collections": "वसूली",
+    "returns": "वापसी"
   },
   "dayEnd": {
     "title": "दिन-अंत सारांश",
@@ -111,5 +115,65 @@
   "gstr1Filter": {
     "period": "अवधि",
     "view": "देखें"
+  },
+  "purchases": {
+    "title": "खरीद रिपोर्ट",
+    "description": "आपने क्या खरीदा — GRN से।",
+    "groupDay": "दिन",
+    "groupSupplier": "सप्लायर",
+    "groupItem": "आइटम",
+    "statGrns": "रसीदें",
+    "statValue": "खरीद मूल्य",
+    "colQty": "मात्रा",
+    "colCount": "संख्या",
+    "colValue": "मूल्य",
+    "emptyTitle": "इस अवधि में कोई खरीद नहीं",
+    "emptyDescription": "स्टॉक → GRN में रसीद दर्ज करें।"
+  },
+  "receivables": {
+    "title": "बकाया",
+    "description": "{asOf} तक किस पर कितना बकाया है।",
+    "statTotal": "कुल बकाया",
+    "stat0to30": "0–30 दिन",
+    "stat31to60": "31–60 दिन",
+    "stat60plus": "60+ दिन",
+    "colParty": "पार्टी",
+    "colPhone": "फोन",
+    "col0to30": "0–30 दिन",
+    "col31to60": "31–60 दिन",
+    "col60plus": "60+ दिन",
+    "colOutstanding": "बकाया",
+    "showAll": "सभी पार्टियाँ दिखाएँ",
+    "showDueOnly": "केवल बकाया वाली पार्टियाँ",
+    "emptyTitle": "कोई बकाया नहीं",
+    "emptyDescription": "अभी किसी पर बकाया नहीं है।"
+  },
+  "collections": {
+    "title": "वसूली",
+    "description": "अवधि में प्राप्त भुगतान।",
+    "groupDay": "दिन",
+    "groupMode": "भुगतान माध्यम",
+    "statCount": "भुगतान",
+    "statTotal": "कुल वसूली",
+    "colCount": "संख्या",
+    "colAmount": "राशि",
+    "emptyTitle": "इस अवधि में कोई भुगतान नहीं",
+    "emptyDescription": "बिल और खाता भुगतान यहाँ दिखेंगे।"
+  },
+  "returns": {
+    "title": "बिक्री वापसी",
+    "description": "अवधि में जारी क्रेडिट नोट।",
+    "statCount": "क्रेडिट नोट",
+    "statTax": "कर वापस",
+    "statTotal": "कुल वापसी",
+    "colNo": "क्रेडिट नोट",
+    "colDate": "तारीख",
+    "colInvoice": "बिल",
+    "colParty": "पार्टी",
+    "colReason": "कारण",
+    "colRefund": "रिफंड",
+    "colTotal": "राशि",
+    "emptyTitle": "इस अवधि में कोई वापसी नहीं",
+    "emptyDescription": "क्रेडिट नोट यहाँ दिखेंगे।"
   }
 }

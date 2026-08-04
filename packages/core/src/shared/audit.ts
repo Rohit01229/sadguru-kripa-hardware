@@ -5,6 +5,9 @@
 import type { Tx } from "./db";
 
 export interface AuditInput {
+  /** The tenant the audited action belongs to (17). Required — for SYSTEM jobs with no
+   * actor, derive it from the row being touched. Every audit row is shop-scoped. */
+  shopId: string;
   /** Staff user who performed the action (null for unattributed acts, e.g. kacha stock-out — 10 §7). */
   actorStaffId?: string | null;
   /** Role key in effect at the time (e.g. "OWNER"), for after-the-fact review. */
@@ -33,6 +36,7 @@ export interface AuditInput {
 export async function audit(tx: Tx, input: AuditInput): Promise<string> {
   const row = await tx.auditLog.create({
     data: {
+      shopId: input.shopId,
       actorStaffId: input.actorStaffId ?? null,
       roleAtTime: input.roleAtTime ?? null,
       permissionUsed: input.permissionUsed ?? null,

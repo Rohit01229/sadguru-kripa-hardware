@@ -56,17 +56,17 @@ describe("inventory.listStock — low-stock filter (lowOnly + lowStockOnly alias
   });
 
   it("returns ALL active products when no low-stock flag is set", async () => {
-    const page = await listStock({});
+    const page = await listStock("shop_test", {});
     expect(page.data.map((r) => r.productId).sort()).toEqual(["low", "nolevel", "ok"]);
   });
 
   it("legacy lowOnly:true keeps only items at/below reorder level", async () => {
-    const page = await listStock({ lowOnly: true });
+    const page = await listStock("shop_test", { lowOnly: true });
     expect(page.data.map((r) => r.productId)).toEqual(["low"]);
   });
 
   it("lowStockOnly:true alias engages the same filter (regression)", async () => {
-    const page = await listStock({ lowStockOnly: true });
+    const page = await listStock("shop_test", { lowStockOnly: true });
     expect(page.data.map((r) => r.productId)).toEqual(["low"]);
   });
 });

@@ -27,7 +27,7 @@ function mockTx(affectedRows: number) {
 describe("inventory.decrementStock — atomic guard", () => {
   it("throws InsufficientStock and writes no movement when the guarded UPDATE affects 0 rows", async () => {
     const { tx, movementCreate } = mockTx(0);
-    await expect(decrementStock(tx, "p1", "5", "SALE_OUT")).rejects.toBeInstanceOf(
+    await expect(decrementStock(tx, "shop_test", "p1", "5", "SALE_OUT")).rejects.toBeInstanceOf(
       InsufficientStock,
     );
     expect(movementCreate).not.toHaveBeenCalled();
@@ -35,20 +35,21 @@ describe("inventory.decrementStock — atomic guard", () => {
 
   it("writes a single negative-signed movement when the UPDATE succeeds (1 row)", async () => {
     const { tx, movementCreate } = mockTx(1);
-    await decrementStock(tx, "p1", "5", "SALE_OUT", { refType: "INVOICE", refId: "inv1" });
+    await decrementStock(tx, "shop_test", "p1", "5", "SALE_OUT", { refType: "INVOICE", refId: "inv1" });
     expect(movementCreate).toHaveBeenCalledTimes(1);
     const data = movementCreate.mock.calls[0]![0].data;
     expect(new Decimal(data.baseQty.toString()).toNumber()).toBe(-5); // signed − out
     expect(data.kind).toBe("SALE_OUT");
     expect(data.refType).toBe("INVOICE");
+    expect(data.shopId).toBe("shop_test"); // movement is shop-scoped (17)
   });
 
   it("rejects a zero or negative quantity at the boundary", async () => {
     const { tx } = mockTx(1);
-    await expect(decrementStock(tx, "p1", "0", "SALE_OUT")).rejects.toBeInstanceOf(
+    await expect(decrementStock(tx, "shop_test", "p1", "0", "SALE_OUT")).rejects.toBeInstanceOf(
       InsufficientStock,
     );
-    await expect(decrementStock(tx, "p1", "-2", "SALE_OUT")).rejects.toBeInstanceOf(
+    await expect(decrementStock(tx, "shop_test", "p1", "-2", "SALE_OUT")).rejects.toBeInstanceOf(
       InsufficientStock,
     );
   });
@@ -57,7 +58,7 @@ describe("inventory.decrementStock — atomic guard", () => {
     // Even with 0 'available', allowNegative path returns affected rows from the
     // unconditional UPDATE; assert the movement is still written.
     const { tx, movementCreate } = mockTx(1);
-    await decrementStock(tx, "p1", "3", "ADJUST_OUT", {}, true);
+    await decrementStock(tx, "shop_test", "p1", "3", "ADJUST_OUT", {}, true);
     expect(movementCreate).toHaveBeenCalledTimes(1);
   });
 });
@@ -65,11 +66,13 @@ describe("inventory.decrementStock — atomic guard", () => {
 describe("inventory.incrementStock", () => {
   it("upserts stock and writes a positive-signed movement", async () => {
     const { tx, movementCreate, stockUpsert } = mockTx(1);
-    await incrementStock(tx, "p1", "450", "GRN_IN", { refType: "GRN", refId: "grn1" });
+    await incrementStock(tx, "shop_test", "p1", "450", "GRN_IN", { refType: "GRN", refId: "grn1" });
     expect(stockUpsert).toHaveBeenCalledTimes(1);
+    expect(stockUpsert.mock.calls[0]![0].create.shopId).toBe("shop_test"); // upsert create-branch stamps shopId
     const data = movementCreate.mock.calls[0]![0].data;
     expect(new Decimal(data.baseQty.toString()).toNumber()).toBe(450); // signed + in
     expect(data.kind).toBe("GRN_IN");
+    expect(data.shopId).toBe("shop_test"); // movement is shop-scoped (17)
   });
 });
 
@@ -77,15 +80,16 @@ describe("inventory.reserve — availability guard", () => {
   it("throws InsufficientStock when the reserve UPDATE affects 0 rows", async () => {
     const { tx, reservationCreate } = mockTx(0);
     await expect(
-      reserve(tx, "o1", "p1", "5", new Date(Date.now() + 60_000)),
+      reserve(tx, "shop_test", "o1", "p1", "5", new Date(Date.now() + 60_000)),
     ).rejects.toBeInstanceOf(InsufficientStock);
     expect(reservationCreate).not.toHaveBeenCalled();
   });
 
   it("creates a Reservation row when availability allows", async () => {
     const { tx, reservationCreate } = mockTx(1);
-    const id = await reserve(tx, "o1", "p1", "5", new Date(Date.now() + 60_000));
+    const id = await reserve(tx, "shop_test", "o1", "p1", "5", new Date(Date.now() + 60_000));
     expect(id).toBe("rsv1");
     expect(reservationCreate).toHaveBeenCalledTimes(1);
+    expect(reservationCreate.mock.calls[0]![0].data.shopId).toBe("shop_test"); // reservation is shop-scoped (17)
   });
 });

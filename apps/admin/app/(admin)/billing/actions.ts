@@ -14,6 +14,10 @@ import {
   convertKachaSchema,
   cancelInvoiceSchema,
   createCreditNoteSchema,
+  createCustomer,
+  createProduct,
+  createProductSchema,
+  upsertCustomerSchema,
   type KachaEstimate,
   type InvoiceDTO,
   type CreditNoteDTO,
@@ -177,6 +181,125 @@ export async function createCreditNoteAction(
     revalidatePath(`/billing/invoices/${invoiceId}`);
     revalidatePath("/stock");
     return { ok: true, creditNote };
+  } catch (e) {
+    return { error: toError(e) };
+  }
+}
+
+// ── Quick-add from inside the bill (19 §6 — myBillBook parity) ──
+// A counter sale must never force the operator out of the till. These two actions let
+// the POS create a party or an item inline, and hand back exactly the shape the cart
+// needs so it can be selected/added immediately. Both go through the SAME guarded core
+// services as the full forms — quick entry changes the UI, never the rules.
+
+export interface QuickCustomerState {
+  ok?: boolean;
+  error?: string;
+  customer?: { id: string; name: string; phone: string | null; gstin: string | null };
+}
+
+/** Create a khata party with just a name (+ optional phone) without leaving the bill. */
+export async function quickCreateCustomerAction(
+  name: string,
+  phone?: string | null,
+): Promise<QuickCustomerState> {
+  try {
+    const c = await ctx();
+    const input = upsertCustomerSchema.parse({
+      name,
+      phone: phone?.trim() ? phone.trim() : null,
+      gstin: null,
+      type: "RETAIL",
+      creditLimit: null,
+    });
+    const customer = await createCustomer(input, c);
+    revalidatePath("/ledger");
+    return {
+      ok: true,
+      customer: { id: customer.id, name: customer.name, phone: customer.phone, gstin: customer.gstin },
+    };
+  } catch (e) {
+    return { error: toError(e) };
+  }
+}
+
+export interface QuickItemState {
+  ok?: boolean;
+  error?: string;
+  /** The created product, projected into the POS DTO so it can go straight in the cart. */
+  product?: {
+    id: string;
+    name: string;
+    sku: string;
+    barcode: string | null;
+    gstRatePct: string;
+    priceInclusive: boolean;
+    hsnCode: string | null;
+    baseUnitCode: string;
+    availableBase: string;
+    saleUnits: {
+      id: string;
+      unitCode: string;
+      unitName: string;
+      unitKind: "MEASURED" | "PIECE";
+      factorToBase: string;
+      salePrice: number;
+      mrp: number | null;
+      isDefault: boolean;
+    }[];
+  };
+}
+
+/**
+ * Create an item mid-bill from just a name + selling price. Everything else (item code,
+ * unit, category, the sale unit itself) is back-filled by the core exactly as on the
+ * quick "New Item" form — so ringing up something that isn't in the catalog yet costs
+ * two fields, not a trip to the catalog screen.
+ */
+export async function quickCreateItemAction(
+  name: string,
+  salePriceRupees: string,
+  gstRatePct: string,
+): Promise<QuickItemState> {
+  try {
+    const c = await ctx();
+    const paise = Math.round(Number(salePriceRupees) * 100);
+    if (!Number.isFinite(paise) || paise < 0) {
+      return { error: "Enter a valid selling price." };
+    }
+    // Parse first so the schema's defaults are applied (createProduct takes the
+    // post-parse shape); the service re-parses, which is idempotent.
+    const input = createProductSchema.parse({
+      name,
+      salePrice: paise,
+      gstRatePct: gstRatePct || "18",
+    });
+    const p = await createProduct(input, c);
+    revalidatePath("/catalog");
+    return {
+      ok: true,
+      product: {
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode,
+        gstRatePct: p.gstRatePct,
+        priceInclusive: p.priceInclusive,
+        hsnCode: p.hsnCode,
+        baseUnitCode: p.baseUnit.code,
+        availableBase: p.availableBase,
+        saleUnits: p.saleUnits.map((su) => ({
+          id: su.id,
+          unitCode: su.unitCode,
+          unitName: su.unitName,
+          unitKind: su.unitKind,
+          factorToBase: su.factorToBase,
+          salePrice: su.salePrice,
+          mrp: su.mrp,
+          isDefault: su.isDefault,
+        })),
+      },
+    };
   } catch (e) {
     return { error: toError(e) };
   }

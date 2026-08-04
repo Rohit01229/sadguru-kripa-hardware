@@ -7,7 +7,7 @@
 import Decimal from "decimal.js";
 import { Prisma, prisma, runTx, type Tx } from "../shared/db";
 import { audit } from "../shared/audit";
-import { requirePermission, type Session } from "../shared/rbac";
+import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";
 import { toPaise, fromPaise } from "../shared/money";
 import { toBaseQty } from "../shared/uom";
@@ -56,15 +56,22 @@ interface CounterRow {
  */
 export async function nextInvoiceNo(
   tx: Tx,
+  shopId: string,
   fy: string,
 ): Promise<{ seq: number; invoiceNo: string }> {
-  // Ensure the FY counter row exists without disturbing an existing one.
-  await tx.invoiceCounter.upsert({ where: { fy }, create: { fy, lastNo: 0 }, update: {} });
+  // Ensure the (shop, FY) counter row exists without disturbing an existing one.
+  // The composite PK @@id([shopId, fy]) makes this row the PER-SHOP lock, so shops
+  // no longer serialise against each other (17 §4b).
+  await tx.invoiceCounter.upsert({
+    where: { shopId_fy: { shopId, fy } },
+    create: { shopId, fy, lastNo: 0 },
+    update: {},
+  });
 
   const rows = await tx.$queryRaw<CounterRow[]>`
     UPDATE "InvoiceCounter"
     SET "lastNo" = "lastNo" + 1
-    WHERE "fy" = ${fy}
+    WHERE "fy" = ${fy} AND "shopId" = ${shopId}
     RETURNING "lastNo"`;
 
   const seq = rows[0]!.lastNo;
@@ -78,14 +85,19 @@ export async function nextInvoiceNo(
  */
 export async function nextCreditNoteNo(
   tx: Tx,
+  shopId: string,
   fy: string,
 ): Promise<{ seq: number; creditNoteNo: string }> {
-  await tx.creditNoteCounter.upsert({ where: { fy }, create: { fy, lastNo: 0 }, update: {} });
+  await tx.creditNoteCounter.upsert({
+    where: { shopId_fy: { shopId, fy } },
+    create: { shopId, fy, lastNo: 0 },
+    update: {},
+  });
 
   const rows = await tx.$queryRaw<CounterRow[]>`
     UPDATE "CreditNoteCounter"
     SET "lastNo" = "lastNo" + 1
-    WHERE "fy" = ${fy}
+    WHERE "fy" = ${fy} AND "shopId" = ${shopId}
     RETURNING "lastNo"`;
 
   const seq = rows[0]!.lastNo;
@@ -139,9 +151,14 @@ interface LoadedSaleUnit {
  * product (guards against cross-product spoofing). Uses the caller's tx so the read
  * is consistent with the decrement in the same transaction.
  */
-async function loadLineCatalog(tx: Tx, productId: string, saleUnitId: string): Promise<LoadedSaleUnit> {
+async function loadLineCatalog(
+  tx: Tx,
+  shopId: string,
+  productId: string,
+  saleUnitId: string,
+): Promise<LoadedSaleUnit> {
   const su = await tx.productSaleUnit.findFirst({
-    where: { id: saleUnitId, productId },
+    where: { id: saleUnitId, productId, shopId },
     select: {
       id: true,
       factorToBase: true,
@@ -207,6 +224,7 @@ export interface KachaEstimate {
  */
 export async function finalizeKacha(input: KachaDecrementInput, ctx: BillingCtx): Promise<KachaEstimate> {
   requirePermission(ctx.session, "bill.kacha.create");
+  const shopId = requireShop(ctx.session);
   const data = kachaDecrementSchema.parse(input);
 
   return await runTx(async (tx) => {
@@ -214,13 +232,13 @@ export async function finalizeKacha(input: KachaDecrementInput, ctx: BillingCtx)
     const refs: string[] = [];
 
     for (const line of data.lines) {
-      const su = await loadLineCatalog(tx, line.productId, line.saleUnitId);
+      const su = await loadLineCatalog(tx, shopId, line.productId, line.saleUnitId);
       const baseQty = toBase(line.quantity, su);
       // Inventory kernel: atomic −stock + ONE signed KACHA_OUT movement. No refType/
       // refId/customer — an UNATTRIBUTED stock-out, but tagged KACHA_OUT so Reports
       // can separate kacha sale from real shrinkage (03 §6). actorStaffId on the
       // movement is the only attribution kept.
-      const movementId = await decrementStock(tx, line.productId, baseQty, "KACHA_OUT", {
+      const movementId = await decrementStock(tx, shopId, line.productId, baseQty, "KACHA_OUT", {
         actorStaffId: ctx.session.userId,
       });
       lines.push({
@@ -235,6 +253,7 @@ export async function finalizeKacha(input: KachaDecrementInput, ctx: BillingCtx)
 
     // Audited as an unattributed stock-out: actor + movement only, NO bill/value (10 §7).
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "bill.kacha.create",
       action: "bill.kacha.create",
@@ -321,7 +340,7 @@ interface FinalizePakkaOptions {
 /**
  * The shared pakka-create transaction used by both finalizePakka and
  * convertKachaToPakka. ONE prisma.$transaction (03 §2):
- *  1. nextInvoiceNo(fy) — gapless number allocated under a row lock IN THIS TX, so a
+ *  1. nextInvoiceNo(shopId, fy) — gapless number allocated under a row lock IN THIS TX, so a
  *     rolled-back bill burns no number (03 §7).
  *  2. per line: resolve the effective price (manual override > catalog default),
  *     convert qty → base, compute discount-before-tax + place-of-supply tax via the
@@ -339,6 +358,7 @@ async function finalizePakkaTx(
   opts: FinalizePakkaOptions,
 ): Promise<InvoiceDTO> {
   requirePermission(ctx.session, "bill.pakka.create");
+  const shopId = requireShop(ctx.session);
 
   // KHATA / part-payment posts the unpaid balance to the customer ledger (S5 — wired
   // below via ledger.post inside the SAME invoice tx). A khata sale MUST name an
@@ -368,7 +388,7 @@ async function finalizePakkaTx(
   // Resolve home state (place-of-supply default) from StoreConfig outside the tx —
   // it is a stable single-row config read.
   const store = await prisma.storeConfig.findUnique({
-    where: { id: "default" },
+    where: { shopId },
     select: { homeState: true, gstRoundingMode: true },
   });
   if (!store) throw new DomainError("StoreConfig not initialised", "NOT_FOUND");
@@ -378,7 +398,7 @@ async function finalizePakkaTx(
   try {
     return await runTx(async (tx) => {
       // 1. Gapless number IN THIS TX (rollback burns none — 03 §7).
-      const { invoiceNo } = await nextInvoiceNo(tx, fy);
+      const { invoiceNo } = await nextInvoiceNo(tx, shopId, fy);
 
       // 2. Load catalog + convert + decrement per line, collecting LineInput for the
       // pure tax computation. Order is preserved so stockMovementRefs[i] maps to line i.
@@ -387,7 +407,7 @@ async function finalizePakkaTx(
 
       for (let i = 0; i < data.lines.length; i++) {
         const line = data.lines[i]!;
-        const cat = await loadLineCatalog(tx, line.productId, line.saleUnitId);
+        const cat = await loadLineCatalog(tx, shopId, line.productId, line.saleUnitId);
         const baseQty = toBase(line.quantity, cat);
         // Manual rate override (10 §4) wins over the catalog default; both are
         // per-sale-unit prices (inclusive iff product.priceInclusive — 03 §8).
@@ -396,7 +416,7 @@ async function finalizePakkaTx(
 
         // Stock: SALE_OUT, UNLESS the kacha already decremented (attribute, no re-deduct).
         if (!opts.stockAlreadyDecremented) {
-          await decrementStock(tx, line.productId, baseQty, "SALE_OUT", {
+          await decrementStock(tx, shopId, line.productId, baseQty, "SALE_OUT", {
             refType: "INVOICE",
             refId: invoiceNo,
             actorStaffId: ctx.session.userId,
@@ -407,7 +427,7 @@ async function finalizePakkaTx(
           const movementId = opts.stockMovementRefs?.[i];
           if (movementId) {
             await tx.stockMovement.updateMany({
-              where: { id: movementId, refId: null },
+              where: { id: movementId, refId: null, shopId },
               data: { refType: "INVOICE", refId: invoiceNo },
             });
           }
@@ -438,6 +458,7 @@ async function finalizePakkaTx(
       const customer = data.customer ?? null;
       const invoice = await tx.invoice.create({
         data: {
+          shopId,
           fy,
           invoiceNo,
           customerId: customer?.customerId ?? null,
@@ -458,6 +479,7 @@ async function finalizePakkaTx(
             create: loaded.map((l, i) => {
               const c = totals.lines[i]!;
               return {
+                shopId,
                 productId: l.line.productId,
                 saleUnitId: l.line.saleUnitId,
                 hsnCode: l.cat.hsnCode,
@@ -493,6 +515,7 @@ async function finalizePakkaTx(
       if (recorded > 0) {
         await tx.payment.create({
           data: {
+            shopId,
             invoiceId: invoice.id,
             customerId: customer?.customerId ?? null,
             mode: dbMode,
@@ -509,7 +532,7 @@ async function finalizePakkaTx(
       // sale (rare) posts nothing. customerId is guaranteed present for khata (checked
       // above). Cash/UPI/card sales NEVER touch the ledger.
       if (isKhata && balanceToLedger > 0) {
-        await ledgerPost(tx, customer!.customerId!, "INVOICE_DEBIT", fromPaise(balanceToLedger), {
+        await ledgerPost(tx, shopId, customer!.customerId!, "INVOICE_DEBIT", fromPaise(balanceToLedger), {
           refType: "INVOICE",
           refId: invoice.id,
           note: invoiceNo,
@@ -562,6 +585,7 @@ async function finalizePakkaTx(
       };
 
       await audit(tx, {
+        shopId,
         ...auditMeta(ctx.session),
         permissionUsed: "bill.pakka.create",
         action: "bill.pakka.create",
@@ -650,6 +674,8 @@ export interface OrderInvoiceLineInput {
 }
 
 export interface OrderInvoiceInput {
+  /** The tenant this order/invoice belongs to (17). Threaded into every write + read. */
+  shopId: string;
   orderId: string;
   /** Customer billing party (the storefront account's Customer — 13 §7). */
   customerId: string;
@@ -673,7 +699,7 @@ export interface OrderInvoiceInput {
  * stock. Keeping this in Billing preserves the invariant "only Billing mints invoice
  * numbers + tax rows" (03 §3): Orders delegates rather than duplicating.
  *
- *  - `nextInvoiceNo(tx, fy)` — gapless number under a row lock in THIS tx (03 §7);
+ *  - `nextInvoiceNo(tx, shopId, fy)` — gapless number under a row lock in THIS tx (03 §7);
  *    a rolled-back dispatch burns no number.
  *  - place-of-supply tax via the pure computeInvoiceTotals (IGST if inter-state).
  *  - `Invoice.orderId` ties the bill 1:1 to the order (@@unique backstop — 13 §9).
@@ -684,11 +710,12 @@ export interface OrderInvoiceInput {
  * not pass homeState; we read it from StoreConfig.
  */
 export async function buildOrderInvoiceTx(tx: Tx, input: OrderInvoiceInput): Promise<InvoiceDTO> {
+  const shopId = input.shopId;
   const now = new Date();
   const fy = financialYear(now);
 
   const store = await tx.storeConfig.findUnique({
-    where: { id: "default" },
+    where: { shopId },
     select: { homeState: true, gstRoundingMode: true },
   });
   if (!store) throw new DomainError("StoreConfig not initialised", "NOT_FOUND");
@@ -699,7 +726,7 @@ export async function buildOrderInvoiceTx(tx: Tx, input: OrderInvoiceInput): Pro
   const loaded: { line: OrderInvoiceLineInput; cat: LoadedSaleUnit }[] = [];
   const taxInputs: LineInput[] = [];
   for (const line of input.lines) {
-    const cat = await loadLineCatalog(tx, line.productId, line.saleUnitId);
+    const cat = await loadLineCatalog(tx, shopId, line.productId, line.saleUnitId);
     loaded.push({ line, cat });
     taxInputs.push({
       unitPrice: line.unitPrice,
@@ -719,10 +746,11 @@ export async function buildOrderInvoiceTx(tx: Tx, input: OrderInvoiceInput): Pro
     roundOff: doRound,
   });
 
-  const { invoiceNo } = await nextInvoiceNo(tx, fy);
+  const { invoiceNo } = await nextInvoiceNo(tx, shopId, fy);
 
   const invoice = await tx.invoice.create({
     data: {
+      shopId,
       fy,
       invoiceNo,
       customerId: input.customerId,
@@ -743,6 +771,7 @@ export async function buildOrderInvoiceTx(tx: Tx, input: OrderInvoiceInput): Pro
         create: loaded.map((l, i) => {
           const c = totals.lines[i]!;
           return {
+            shopId,
             productId: l.line.productId,
             saleUnitId: l.line.saleUnitId,
             hsnCode: l.cat.hsnCode,
@@ -769,6 +798,7 @@ export async function buildOrderInvoiceTx(tx: Tx, input: OrderInvoiceInput): Pro
     // gateway payment id — the order was prepaid, so the full grand total is paid.
     await tx.payment.create({
       data: {
+        shopId,
         invoiceId: invoice.id,
         orderId: input.orderId,
         customerId: input.customerId,
@@ -854,11 +884,12 @@ export async function cancelInvoice(
   ctx: BillingCtx,
 ): Promise<InvoiceDTO> {
   requirePermission(ctx.session, "bill.cancel");
+  const shopId = requireShop(ctx.session);
   const data = cancelInvoiceSchema.parse(input);
 
   await runTx(async (tx) => {
-    const inv = await tx.invoice.findUnique({
-      where: { id },
+    const inv = await tx.invoice.findFirst({
+      where: { id, shopId },
       include: { lines: true },
     });
     if (!inv) throw new DomainError(`Invoice ${id} not found`, "NOT_FOUND");
@@ -868,7 +899,7 @@ export async function cancelInvoice(
 
     // 1. Reverse stock — goods come back IN, one SALES_RETURN_IN per line.
     for (const l of inv.lines) {
-      await incrementStock(tx, l.productId, l.baseQty, "SALES_RETURN_IN", {
+      await incrementStock(tx, shopId, l.productId, l.baseQty, "SALES_RETURN_IN", {
         refType: "CANCEL",
         refId: inv.id,
         reason: `cancel ${inv.invoiceNo}`,
@@ -879,12 +910,12 @@ export async function cancelInvoice(
     // 2. Reverse the ledger — net out any khata receivable this invoice posted.
     if (inv.customerId) {
       const debit = await tx.ledgerEntry.aggregate({
-        where: { customerId: inv.customerId, refType: "INVOICE", refId: inv.id, type: "INVOICE_DEBIT" },
+        where: { shopId, customerId: inv.customerId, refType: "INVOICE", refId: inv.id, type: "INVOICE_DEBIT" },
         _sum: { amount: true },
       });
       const owed = debit._sum.amount ?? new Decimal(0);
       if (owed.gt(0)) {
-        await ledgerPost(tx, inv.customerId, "CREDIT_NOTE_CREDIT", owed, {
+        await ledgerPost(tx, shopId, inv.customerId, "CREDIT_NOTE_CREDIT", owed, {
           refType: "CANCEL",
           refId: inv.id,
           note: `cancel ${inv.invoiceNo}`,
@@ -899,6 +930,7 @@ export async function cancelInvoice(
     });
 
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "bill.cancel",
       action: "bill.cancel",
@@ -910,7 +942,7 @@ export async function cancelInvoice(
     });
   });
 
-  const dto = await getInvoice(id);
+  const dto = await getInvoice(shopId, id);
   if (!dto) throw new DomainError(`Invoice ${id} not found`, "NOT_FOUND");
   return dto;
 }
@@ -949,7 +981,7 @@ export interface CreditNoteDTO {
 /**
  * Create a credit note against an ACTIVE pakka invoice (04 Billing-credit-note;
  * `bill.creditnote.create`). ONE transaction:
- *  1. nextCreditNoteNo(fy) — an INDEPENDENT gapless series from invoices (03 §7),
+ *  1. nextCreditNoteNo(shopId, fy) — an INDEPENDENT gapless series from invoices (03 §7),
  *     allocated under a row lock IN THIS TX.
  *  2. for each returned line: locate the matching ORIGINAL InvoiceLine, validate the
  *     return qty does not exceed (billed − already-credited), price the return at the
@@ -970,6 +1002,7 @@ export async function createCreditNote(
   ctx: BillingCtx,
 ): Promise<CreditNoteDTO> {
   requirePermission(ctx.session, "bill.creditnote.create");
+  const shopId = requireShop(ctx.session);
   const data = createCreditNoteSchema.parse(input);
 
   const route = "POST /api/billing/pakka/{id}/credit-note";
@@ -986,8 +1019,8 @@ export async function createCreditNote(
 
   try {
     return await runTx(async (tx) => {
-      const inv = await tx.invoice.findUnique({
-        where: { id: invoiceId },
+      const inv = await tx.invoice.findFirst({
+        where: { id: invoiceId, shopId },
         include: { lines: true, creditNotes: { include: { lines: true } } },
       });
       if (!inv) throw new DomainError(`Invoice ${invoiceId} not found`, "NOT_FOUND");
@@ -1036,7 +1069,7 @@ export async function createCreditNote(
 
         // Convert the return sale-qty → base via the same factor the invoice used
         // (origBaseQty / origSaleQty), so a coil/metre return reverses exactly.
-        const su = await loadLineCatalog(tx, rl.productId, rl.saleUnitId);
+        const su = await loadLineCatalog(tx, shopId, rl.productId, rl.saleUnitId);
         const returnBase = toBase(rl.quantity, su);
 
         const key = `${rl.productId}::${rl.saleUnitId}`;
@@ -1060,7 +1093,7 @@ export async function createCreditNote(
         const lineTotal = taxable.plus(cgst).plus(sgst).plus(igst);
 
         // Goods back IN — one SALES_RETURN_IN per credited line.
-        await incrementStock(tx, rl.productId, returnBase, "SALES_RETURN_IN", {
+        await incrementStock(tx, shopId, rl.productId, returnBase, "SALES_RETURN_IN", {
           refType: "CN",
           refId: inv.id,
           reason: `credit note vs ${inv.invoiceNo}`,
@@ -1090,10 +1123,11 @@ export async function createCreditNote(
       const grandTotal = taxableTotal.plus(cgstTotal).plus(sgstTotal).plus(igstTotal);
 
       // Independent gapless CN number IN THIS TX (rollback burns none — 03 §7).
-      const { creditNoteNo } = await nextCreditNoteNo(tx, inv.fy);
+      const { creditNoteNo } = await nextCreditNoteNo(tx, shopId, inv.fy);
 
       const cn = await tx.creditNote.create({
         data: {
+          shopId,
           fy: inv.fy,
           creditNoteNo,
           invoiceId: inv.id,
@@ -1106,6 +1140,7 @@ export async function createCreditNote(
           refundMode: data.refundMode,
           lines: {
             create: cnLines.map((l) => ({
+              shopId,
               productId: l.productId,
               saleUnitId: l.saleUnitId,
               saleQty: l.saleQty,
@@ -1127,7 +1162,7 @@ export async function createCreditNote(
             "KHATA_CUSTOMER_REQUIRED",
           );
         }
-        await ledgerPost(tx, inv.customerId, "CREDIT_NOTE_CREDIT", grandTotal, {
+        await ledgerPost(tx, shopId, inv.customerId, "CREDIT_NOTE_CREDIT", grandTotal, {
           refType: "CN",
           refId: cn.id,
           note: creditNoteNo,
@@ -1135,6 +1170,7 @@ export async function createCreditNote(
       }
 
       await audit(tx, {
+        shopId,
         ...auditMeta(ctx.session),
         permissionUsed: "bill.creditnote.create",
         action: "bill.creditnote.create",
@@ -1202,15 +1238,15 @@ export async function createCreditNote(
   }
 }
 
-/** List credit notes for an invoice (reprint / audit). Read-only. */
-export async function listCreditNotesForInvoice(invoiceId: Id): Promise<CreditNoteDTO[]> {
-  const inv = await prisma.invoice.findUnique({
-    where: { id: invoiceId },
+/** List credit notes for an invoice (reprint / audit). Read-only. Shop-scoped (17). */
+export async function listCreditNotesForInvoice(shopId: string, invoiceId: Id): Promise<CreditNoteDTO[]> {
+  const inv = await prisma.invoice.findFirst({
+    where: { id: invoiceId, shopId },
     select: { invoiceNo: true, igstTotal: true },
   });
   if (!inv) return [];
   const notes = await prisma.creditNote.findMany({
-    where: { invoiceId },
+    where: { invoiceId, shopId },
     include: { lines: true },
     orderBy: { createdAt: "desc" },
   });
@@ -1329,11 +1365,14 @@ function toInvoiceDTO(inv: InvoiceWith): InvoiceDTO {
  * (DESC — newest first). All filters are optional + additive: omitting one matches
  * the prior (unfiltered) behaviour.
  */
-export async function listInvoices(query: ListInvoicesQuery = {}): Promise<InvoicePage> {
+export async function listInvoices(
+  shopId: string,
+  query: ListInvoicesQuery = {},
+): Promise<InvoicePage> {
   const { status, from, to, customerId, paymentMode, cursor, limit } =
     listInvoicesQuerySchema.parse(query);
 
-  const where: Prisma.InvoiceWhereInput = {};
+  const where: Prisma.InvoiceWhereInput = { shopId };
   if (status) where.status = status;
   if (customerId) where.customerId = customerId;
   if (paymentMode) where.payments = { some: { mode: paymentMode } };
@@ -1363,9 +1402,9 @@ export async function listInvoices(query: ListInvoicesQuery = {}): Promise<Invoi
   };
 }
 
-/** Single invoice for reprint (A4/A5/thermal). Returns null if missing. */
-export async function getInvoice(id: Id): Promise<InvoiceDTO | null> {
-  const inv = await prisma.invoice.findUnique({ where: { id }, include: invoiceInclude });
+/** Single invoice for reprint (A4/A5/thermal). Returns null if missing. Shop-scoped (17). */
+export async function getInvoice(shopId: string, id: Id): Promise<InvoiceDTO | null> {
+  const inv = await prisma.invoice.findFirst({ where: { id, shopId }, include: invoiceInclude });
   return inv ? toInvoiceDTO(inv) : null;
 }
 
@@ -1384,11 +1423,12 @@ export interface StoreConfigDTO {
 /**
  * Read-only StoreConfig for the POS (place-of-supply default = homeState) and the
  * print templates (logo/name/address/GSTIN/bank/T&C — 14-impl-plan Chunk 8). Full
- * settings management (settings.write) is S7; S4 only needs to read the single
- * "default" row. Returns null if the store has not been seeded.
+ * settings management (settings.write) is S7; S4 only needs to read the shop's single
+ * row (StoreConfig.shopId is @unique — one row per shop, 17). Returns null if the shop
+ * has not been seeded.
  */
-export async function getStoreConfig(): Promise<StoreConfigDTO | null> {
-  const s = await prisma.storeConfig.findUnique({ where: { id: "default" } });
+export async function getStoreConfig(shopId: string): Promise<StoreConfigDTO | null> {
+  const s = await prisma.storeConfig.findUnique({ where: { shopId } });
   if (!s) return null;
   return {
     name: s.name,

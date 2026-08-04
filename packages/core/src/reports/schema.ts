@@ -50,6 +50,40 @@ export const stockValuationQuerySchema = z.object({
 });
 export type StockValuationQuery = z.input<typeof stockValuationQuerySchema>;
 
+// ─────────────────── Purchase report (GRN-backed) ───────────────────
+export const purchaseReportQuerySchema = z.object({
+  from: dateString.optional(),
+  to: dateString.optional(),
+  /** Group received goods by day, supplier, or item. */
+  groupBy: z.enum(["day", "supplier", "item"]).optional().default("day"),
+});
+export type PurchaseReportQuery = z.input<typeof purchaseReportQuerySchema>;
+
+// ─────────────────── Receivables / party outstanding (khata) ───────────────────
+export const receivablesQuerySchema = z.object({
+  /** Hide parties who owe nothing (default true — a dues list should show dues). */
+  dueOnly: z.coerce.boolean().optional().default(true),
+  /** As-of date for the aging buckets (defaults to today). */
+  asOf: dateString.optional(),
+  limit: z.number().int().min(1).max(500).optional().default(200),
+});
+export type ReceivablesQuery = z.input<typeof receivablesQuerySchema>;
+
+// ─────────────────── Collections (payments received) ───────────────────
+export const collectionsQuerySchema = z.object({
+  from: dateString.optional(),
+  to: dateString.optional(),
+  groupBy: z.enum(["day", "mode"]).optional().default("day"),
+});
+export type CollectionsQuery = z.input<typeof collectionsQuerySchema>;
+
+// ─────────────────── Sales returns (credit notes) ───────────────────
+export const salesReturnsQuerySchema = z.object({
+  from: dateString.optional(),
+  to: dateString.optional(),
+});
+export type SalesReturnsQuery = z.input<typeof salesReturnsQuerySchema>;
+
 // ─────────────────── Audit log viewer (audit.read) ───────────────────
 export const auditQuerySchema = z.object({
   action: z.string().trim().max(120).optional(),

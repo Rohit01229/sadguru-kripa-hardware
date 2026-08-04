@@ -1,13 +1,15 @@
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getFullStoreConfig, requirePermission, can, Forbidden } from "@hardware/core";
+import Link from "next/link";
 import {
   PageHeader,
+  Button,
   Card,
   CardContent,
   ForbiddenState,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { SettingsForm } from "./SettingsForm";
 
 // Store settings screen (S7; settings.read to view, settings.write to edit). The
@@ -24,7 +26,8 @@ export default async function SettingsPage() {
     throw e;
   }
 
-  const config = await getFullStoreConfig();
+  const shopId = await requireShopId();
+  const config = await getFullStoreConfig(shopId);
   if (!config) {
     return (
       <div className="space-y-6">
@@ -46,6 +49,19 @@ export default async function SettingsPage() {
         title={t("page.title")}
         description={t("page.description")}
       />
+      {canWrite && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="text-sm font-medium">{t("billTheme.title")}</p>
+              <p className="text-xs text-muted-foreground">{t("billTheme.description")}</p>
+            </div>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/settings/bill-theme">{t("billTheme.open")}</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
       {canWrite ? (
         <SettingsForm config={config} />
       ) : (

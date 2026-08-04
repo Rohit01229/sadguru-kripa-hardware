@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { listProducts, getStoreConfig, requirePermission, Forbidden, can } from "@hardware/core";
+import { listProducts, getStoreConfig, getBillTheme, requirePermission, Forbidden, can } from "@hardware/core";
 import { PageHeader, EmptyState, Button } from "@hardware/ui";
-import { getStaffSession } from "../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../lib/session";
 import { BillingNav, Forbid } from "./nav";
 import { PosClient, type PosProduct } from "./PosClient";
 
@@ -42,15 +42,18 @@ export default async function BillingPage() {
   // initial search suggestions, and the cart line-label/preview map; the PosClient's
   // search box additionally queries /api/products?q= so the operator can ring up ANY
   // product, including ones past this first page.
-  const [productPage, store] = await Promise.all([
-    listProducts({ limit: 200 }),
-    getStoreConfig(),
+  const shopId = await requireShopId();
+  const [productPage, store, billTheme] = await Promise.all([
+    listProducts(shopId, { limit: 200 }),
+    getStoreConfig(shopId),
+    getBillTheme(shopId),
   ]);
 
   const products: PosProduct[] = productPage.data.map((p) => ({
     id: p.id,
     name: p.name,
     sku: p.sku,
+    barcode: p.barcode,
     gstRatePct: p.gstRatePct,
     priceInclusive: p.priceInclusive,
     hsnCode: p.hsnCode,
@@ -90,6 +93,7 @@ export default async function BillingPage() {
         />
       ) : (
         <PosClient
+          billTheme={billTheme}
           products={products}
           mayReadCustomers={mayReadCustomers}
           homeState={store?.homeState ?? "19"}

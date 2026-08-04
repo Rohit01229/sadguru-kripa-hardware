@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolvePrice, resolvePriceQuerySchema } from "@hardware/core";
 import { requestId } from "../../../../../lib/logger";
 import { errorResponse } from "../../../../../lib/http";
+import { publicShopId } from "../../../../../lib/session";
 
 // GET /api/products/{id}/price?qty=&unitId= (route, 🌐) — resolve the effective
 // per-sale-unit price for a quantity, applying bulk slabs (visible to all,
@@ -19,7 +20,7 @@ export async function GET(
       saleUnitId: sp.get("unitId") ?? sp.get("saleUnitId") ?? undefined,
       qty: sp.get("qty") ?? undefined,
     });
-    const resolved = await resolvePrice(id, query);
+    const resolved = await resolvePrice(await publicShopId(), id, query);
     return NextResponse.json(resolved);
   } catch (e) {
     return errorResponse(e, rid);

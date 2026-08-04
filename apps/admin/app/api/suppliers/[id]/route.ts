@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { editSupplier, getSupplier, requirePermission, editSupplierSchema } from "@hardware/core";
+import { editSupplier, getSupplier, requireShop, requirePermission, editSupplierSchema } from "@hardware/core";
 import { getStaffSession } from "../../../../lib/session";
 import { requestId } from "../../../../lib/logger";
 import { errorResponse, unauthenticated } from "../../../../lib/http";
@@ -15,8 +15,9 @@ export async function GET(
     const session = await getStaffSession();
     if (!session) return unauthenticated(rid);
     requirePermission(session, "suppliers.read");
+    const shopId = requireShop(session);
     const { id } = await params;
-    const supplier = await getSupplier(id);
+    const supplier = await getSupplier(shopId, id);
     if (!supplier) {
       return NextResponse.json({ error: { code: "NOT_FOUND", message: "Supplier not found.", requestId: rid } }, { status: 404 });
     }

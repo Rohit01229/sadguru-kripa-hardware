@@ -1,6 +1,7 @@
 "use client";
 
-import type { InvoiceDTO, KachaEstimate } from "@hardware/core";
+import type { InvoiceDTO, KachaEstimate, BillTheme, BillAccent } from "@hardware/core";
+import { DEFAULT_BILL_THEME, substituteTokens } from "@hardware/core";
 import { formatMoney, formatPaisePlain, formatQty } from "@hardware/ui";
 
 // Print templates (S4): thermal 2"/3" + A4/A5, selectable. Branding (name, address,
@@ -25,6 +26,74 @@ export interface StoreBranding {
   gstin?: string | null;
   bankDetails?: string | null;
   invoiceTerms?: string | null;
+  /** Cloudinary URL; shown when the theme enables the logo. */
+  logoKey?: string | null;
+  phone?: string | null;
+}
+
+// ── Bill theme (19 §7) ────────────────────────────────────────────────────────
+// The theme only ever *styles and toggles optional blocks*. Everything CGST Rule 46
+// requires on a tax invoice — GSTIN, the CGST/SGST-vs-IGST breakup, HSN on A4/A5,
+// amount in words, the invoice number — is rendered unconditionally below and is not
+// reachable from the config, so no theme can produce a non-compliant bill.
+
+/** Accent tokens → print-safe ink. Deliberately muted: these are printed, not screens. */
+const ACCENT_HEX: Record<BillAccent, string> = {
+  espresso: "#4a2f1b",
+  amber: "#a1601a",
+  kraft: "#7a6a52",
+  ink: "#1f2937",
+  none: "#000000",
+};
+
+const FONT_STACK: Record<BillTheme["fontFamily"], string> = {
+  sans: "ui-sans-serif, system-ui, sans-serif",
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: 'ui-monospace, "Courier New", monospace',
+};
+
+/**
+ * Resolve the theme for a given paper size. Thermal paper overrides some choices
+ * because it physically cannot honour them: it is a fixed-width monospace medium, so a
+ * serif face and a 14pt base would simply misalign the columns.
+ */
+function resolveTheme(theme: BillTheme | undefined, size: PrintSize) {
+  const t = theme ?? DEFAULT_BILL_THEME;
+  const thermal = isThermal(size);
+  return {
+    ...t,
+    accentHex: ACCENT_HEX[t.accent],
+    fontStack: thermal ? FONT_STACK.mono : FONT_STACK[t.fontFamily],
+    // Thermal is width-constrained: keep it small and dense whatever the theme says.
+    basePt: thermal ? Math.min(t.baseSizePt, 9) : t.baseSizePt,
+    tight: thermal || t.density === "compact",
+    // A boxed/ruled table is unreadable at 58mm — thermal always uses minimal rules.
+    borders: thermal ? ("minimal" as const) : t.tableBorders,
+    showHsn: !thermal && t.showHsnColumn,
+  };
+}
+type ResolvedTheme = ReturnType<typeof resolveTheme>;
+
+/** Row/table border classes for the chosen border style. */
+function tableClasses(rt: ResolvedTheme, thermal: boolean) {
+  return {
+    head:
+      rt.borders === "boxed"
+        ? "border border-black"
+        : rt.borders === "ruled"
+          ? thermal
+            ? "border-y"
+            : "border-b-2 border-black"
+          : "border-b",
+    row:
+      rt.borders === "boxed"
+        ? "border border-gray-400"
+        : rt.borders === "ruled"
+          ? thermal
+            ? ""
+            : "border-b border-gray-300"
+          : "",
+  };
 }
 
 /** Optional human label for an invoice line, keyed by product + sale unit. When a
@@ -47,15 +116,29 @@ function isThermal(size: PrintSize): boolean {
   return size === "thermal2" || size === "thermal3";
 }
 
-function Frame({ size, children }: { size: PrintSize; children: React.ReactNode }) {
+function Frame({
+  size,
+  rt,
+  children,
+}: {
+  size: PrintSize;
+  rt: ResolvedTheme;
+  children: React.ReactNode;
+}) {
   const thermal = isThermal(size);
   return (
     <div
       data-print-receipt
-      className={`mx-auto border bg-white text-black ${
-        thermal ? "p-2 text-[11px] leading-tight" : "p-6 text-[12px] leading-snug"
+      className={`mx-auto bg-white text-black ${rt.outerBorder ? "border" : ""} ${
+        thermal ? "p-2 leading-tight" : rt.tight ? "p-4 leading-snug" : "p-6 leading-snug"
       }`}
-      style={{ width: WIDTH[size], fontFamily: thermal ? "monospace" : "inherit" }}
+      style={{
+        width: WIDTH[size],
+        fontFamily: rt.fontStack,
+        // Point sizes are what a print dialog honours; the nested text-[Npx] utilities
+        // stay as relative accents around this base.
+        fontSize: `${rt.basePt}pt`,
+      }}
     >
       {children}
     </div>
@@ -65,25 +148,56 @@ function Frame({ size, children }: { size: PrintSize; children: React.ReactNode 
 function Header({
   store,
   size,
+  rt,
   title,
   subtitle,
 }: {
   store: StoreBranding;
   size: PrintSize;
+  rt: ResolvedTheme;
   title: string;
   subtitle?: string;
 }) {
   const thermal = isThermal(size);
+  const align = rt.headerAlign === "left" && !thermal ? "text-left" : "text-center";
+  const tagline = rt.tagline
+    ? substituteTokens(rt.tagline, { shopName: store.name, shopGstin: store.gstin, shopPhone: store.phone })
+    : "";
   return (
-    <div className="text-center">
-      <div className={thermal ? "text-sm font-bold" : "text-lg font-bold tracking-wide"}>{store.name}</div>
-      {store.address && (
+    <div className={align}>
+      {/* Logo is a plain <img> so it survives print and the PDF pipeline alike. */}
+      {rt.showLogo && store.logoKey ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={store.logoKey}
+          alt=""
+          className={`mb-1 ${rt.headerAlign === "left" && !thermal ? "" : "mx-auto"}`}
+          style={{ maxHeight: thermal ? 28 : 48, maxWidth: "60%", objectFit: "contain" }}
+        />
+      ) : null}
+      <div
+        className={thermal ? "text-sm font-bold" : "text-lg font-bold tracking-wide"}
+        style={{ color: rt.accentHex }}
+      >
+        {store.name}
+      </div>
+      {tagline && <div className={thermal ? "text-[10px]" : "text-[11px] text-gray-700"}>{tagline}</div>}
+      {rt.showAddress && store.address && (
         <div className={thermal ? "text-[10px]" : "text-[11px] text-gray-700"}>{store.address}</div>
       )}
+      {rt.showContact && store.phone && (
+        <div className={thermal ? "text-[10px]" : "text-[11px] text-gray-700"}>Ph: {store.phone}</div>
+      )}
+      {/* GSTIN is mandatory on a tax invoice — never behind a toggle. */}
       {store.gstin && (
         <div className={thermal ? "text-[10px]" : "text-[11px] text-gray-700"}>GSTIN: {store.gstin}</div>
       )}
-      <div className={`mt-1 font-semibold ${thermal ? "" : "mt-2 text-base uppercase tracking-wider"}`}>{title}</div>
+      <div
+        className={`mt-1 font-semibold ${thermal ? "" : "mt-2 text-base uppercase tracking-wider"}`}
+        style={{ color: rt.accentHex }}
+      >
+        {title}
+      </div>
       {subtitle && <div className="text-[10px] text-gray-600">{subtitle}</div>}
     </div>
   );
@@ -97,6 +211,7 @@ export function InvoicePrint({
   storeName,
   size,
   lineLabels,
+  theme,
 }: {
   invoice: InvoiceDTO;
   store?: StoreBranding;
@@ -104,17 +219,21 @@ export function InvoicePrint({
   size: PrintSize;
   /** Optional product/unit names so lines print readable labels instead of ids. */
   lineLabels?: LineLabelLookup[];
+  /** Shop's saved look (19 §7). Omitted → documented defaults. */
+  theme?: BillTheme;
 }) {
   const branding: StoreBranding = store ?? { name: storeName ?? "My Hardware Store" };
   const thermal = isThermal(size);
+  const rt = resolveTheme(theme, size);
+  const tc = tableClasses(rt, thermal);
   const labelFor = (productId: string, saleUnitId: string): string => {
     const hit = lineLabels?.find((l) => l.productId === productId && l.saleUnitId === saleUnitId);
     return hit?.label ?? productId.slice(0, 8);
   };
 
   return (
-    <Frame size={size}>
-      <Header store={branding} size={size} title="TAX INVOICE" />
+    <Frame size={size} rt={rt}>
+      <Header store={branding} size={size} rt={rt} title="TAX INVOICE" />
 
       {/* Invoice meta + bill-to. On A4/A5 these sit side by side; on thermal they stack. */}
       <div
@@ -147,9 +266,9 @@ export function InvoicePrint({
       ) : (
         <table className="mt-2 w-full border-collapse">
           <thead>
-            <tr className={`text-left text-[10px] ${thermal ? "border-y" : "border-b-2 border-black"}`}>
+            <tr className={`text-left text-[10px] ${tc.head}`} style={{ color: rt.accentHex }}>
               <th className="py-0.5 pr-1">Item</th>
-              {!thermal && <th className="py-0.5 px-1">HSN</th>}
+              {rt.showHsn && <th className="py-0.5 px-1">HSN</th>}
               <th className="py-0.5 px-1 text-right">Qty</th>
               <th className="py-0.5 px-1 text-right">Rate</th>
               <th className="py-0.5 px-1 text-right">Taxable</th>
@@ -162,12 +281,18 @@ export function InvoicePrint({
               const name = labelFor(l.productId, l.saleUnitId);
               const gst = l.cgst + l.sgst + l.igst;
               return (
-                <tr key={i} className={`align-top text-[10px] ${thermal ? "" : "border-b border-gray-300"}`}>
+                <tr
+                  key={i}
+                  className={`align-top text-[10px] ${tc.row}`}
+                  style={rt.zebraRows && i % 2 === 1 ? { backgroundColor: "#f6f4f1" } : undefined}
+                >
                   <td className="py-0.5 pr-1">
                     {name}
-                    {thermal && l.hsnCode ? <span className="text-gray-500"> · HSN {l.hsnCode}</span> : null}
+                    {/* Thermal has no HSN column, so it rides along with the item name —
+                        HSN stays on the invoice whatever the theme says. */}
+                    {!rt.showHsn && l.hsnCode ? <span className="text-gray-500"> · HSN {l.hsnCode}</span> : null}
                   </td>
-                  {!thermal && <td className="py-0.5 px-1 text-gray-700">{l.hsnCode ?? "—"}</td>}
+                  {rt.showHsn && <td className="py-0.5 px-1 text-gray-700">{l.hsnCode ?? "—"}</td>}
                   <td className="py-0.5 px-1 text-right tabular-nums">{formatQty(l.saleQty)}</td>
                   <td className="py-0.5 px-1 text-right tabular-nums">{formatPaisePlain(l.unitPrice)}</td>
                   <td className="py-0.5 px-1 text-right tabular-nums">{formatPaisePlain(l.taxableValue)}</td>
@@ -216,32 +341,43 @@ export function InvoicePrint({
         <span className="font-medium">{rupeesInWords(invoice.grandTotal)}</span>
       </div>
 
-      {/* Bank details + terms + authorised signatory */}
-      {branding.bankDetails && (
+      {/* Optional blocks — each toggled by the theme; content still comes from settings. */}
+      {rt.showBankDetails && branding.bankDetails && (
         <div className="mt-2 whitespace-pre-line text-[10px] text-gray-700">
           <span className="font-medium">Bank: </span>
           {branding.bankDetails}
         </div>
       )}
-      {branding.invoiceTerms && (
+      {rt.showTerms && branding.invoiceTerms && (
         <div className="mt-2 whitespace-pre-line text-[9px] text-gray-600">
           <div className="font-medium text-gray-700">Terms &amp; Conditions</div>
           {branding.invoiceTerms}
         </div>
       )}
 
-      {thermal ? (
-        <div className="mt-2 text-center text-[10px]">For {branding.name}</div>
-      ) : (
-        <div className="mt-6 flex items-end justify-between text-[10px]">
-          <div className="text-gray-600">This is a computer-generated invoice.</div>
-          <div className="text-right">
-            <div className="mt-6 border-t border-black pt-1">For {branding.name}</div>
-            <div className="text-gray-600">Authorised Signatory</div>
+      {rt.showSignature &&
+        (thermal ? (
+          <div className="mt-2 text-center text-[10px]">For {branding.name}</div>
+        ) : (
+          <div className="mt-6 flex items-end justify-between text-[10px]">
+            <div className="text-gray-600">This is a computer-generated invoice.</div>
+            <div className="text-right">
+              <div className="mt-6 border-t border-black pt-1">For {branding.name}</div>
+              <div className="text-gray-600">
+                {substituteTokens(rt.signatureLabel, { shopName: branding.name })}
+              </div>
+            </div>
           </div>
+        ))}
+      {rt.showFooterNote && rt.footerNote && (
+        <div className="mt-2 text-center text-[10px]">
+          {substituteTokens(rt.footerNote, {
+            shopName: branding.name,
+            invoiceNo: invoice.invoiceNo,
+            customerName: invoice.customerName,
+          })}
         </div>
       )}
-      <div className="mt-2 text-center text-[10px]">Thank you for your business</div>
     </Frame>
   );
 }
@@ -252,19 +388,23 @@ export function KachaPrint({
   store,
   storeName,
   size,
+  theme,
 }: {
   estimate: KachaEstimate & { items?: { name: string; qty: string; unit: string }[] };
   store?: StoreBranding;
   storeName?: string;
   size: PrintSize;
+  /** Shop's saved look (19 §7). The estimate carries no tax, so only styling applies. */
+  theme?: BillTheme;
 }) {
   const branding: StoreBranding = store ?? { name: storeName ?? "My Hardware Store" };
   const thermal = isThermal(size);
+  const rt = resolveTheme(theme, size);
   const items =
     estimate.items ?? estimate.lines.map((l) => ({ name: l.productId.slice(0, 8), qty: l.quantity, unit: "" }));
   return (
-    <Frame size={size}>
-      <Header store={branding} size={size} title="ESTIMATE" subtitle="Not a tax invoice" />
+    <Frame size={size} rt={rt}>
+      <Header store={branding} size={size} rt={rt} title="ESTIMATE" subtitle="Not a tax invoice" />
       {items.length === 0 ? (
         <div className="mt-3 text-center text-[10px] text-gray-500">No items on this estimate.</div>
       ) : (

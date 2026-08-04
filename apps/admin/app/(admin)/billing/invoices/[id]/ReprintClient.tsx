@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import type { InvoiceDTO } from "@hardware/core";
+import type { InvoiceDTO, BillTheme } from "@hardware/core";
 import { Button, Label, Select } from "@hardware/ui";
 import { InvoicePrint, type PrintSize, type StoreBranding, type LineLabelLookup } from "../../print/Templates";
 
@@ -14,11 +14,14 @@ export function ReprintClient({
   invoice,
   store,
   lineLabels,
+  theme,
 }: {
   invoice: InvoiceDTO;
   store: StoreBranding;
   /** Product/unit names so the receipt prints readable lines (not raw ids). */
   lineLabels?: LineLabelLookup[];
+  /** The shop's saved bill look (19 §7), so a reprint matches the original. */
+  theme?: BillTheme;
 }) {
   const t = useTranslations("billing");
   const tCommon = useTranslations("common");
@@ -44,7 +47,7 @@ export function ReprintClient({
           {tCommon("actions.print")}
         </Button>
       </div>
-      <InvoicePrint invoice={invoice} store={store} size={size} lineLabels={lineLabels} />
+      <InvoicePrint invoice={invoice} store={store} size={size} lineLabels={lineLabels} theme={theme} />
     </div>
   );
 }

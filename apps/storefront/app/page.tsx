@@ -26,6 +26,7 @@ import {
   type CatalogFilterValues,
   type CategoryOption,
 } from "./catalog-filters-shared";
+import { storefrontShopId } from "../lib/session";
 
 // Public catalog (S2 + S3 live stock). Reads the storefront-safe projection via
 // @hardware/core (no cost/supplier fields). SERVER-SIDE filtering only: every filter /
@@ -122,7 +123,8 @@ export default async function CatalogPage({
   // filter sidebar render with the shell. The slow product grid (listProducts) is
   // streamed separately via <Suspense> below, so the page no longer blocks the whole
   // content region on the slowest query.
-  const [tree, brands] = await Promise.all([listCategoryTree(), listBrands()]);
+  const shopId = await storefrontShopId();
+  const [tree, brands] = await Promise.all([listCategoryTree(shopId), listBrands(shopId)]);
 
   const categories: CategoryOption[] = flattenCategories(tree);
   const brandOptions: BrandOption[] = brands.map((b) => ({ value: b.id, label: b.name }));
@@ -168,7 +170,8 @@ async function ProductGrid({
   prev: string | undefined;
 }) {
   const t = await getTranslations("catalog");
-  const page = await listProducts({
+  const shopId = await storefrontShopId();
+  const page = await listProducts(shopId, {
     q: values.q || undefined,
     categoryId: values.categoryId || undefined,
     brandId: values.brandId || undefined,

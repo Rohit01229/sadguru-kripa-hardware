@@ -6,7 +6,7 @@
 // Money is integer paise on the wire (04 §2); slab math is exact Prisma Decimal.
 import { Prisma, prisma, runTx } from "../shared/db";
 import { audit } from "../shared/audit";
-import { requirePermission, type Session } from "../shared/rbac";
+import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";
 import { toPaise, fromPaise } from "../shared/money";
 import type { Id } from "../shared/types";
@@ -80,11 +80,11 @@ export function pickSlabPrice(
  * minQty ≤ qty; falls back to the sale unit's default salePrice when none match.
  * Read-only and public (slabs visible to all).
  */
-export async function resolvePrice(productId: Id, query: { saleUnitId: string; qty: string }): Promise<ResolvedPrice> {
+export async function resolvePrice(shopId: string, productId: Id, query: { saleUnitId: string; qty: string }): Promise<ResolvedPrice> {
   const { saleUnitId, qty } = resolvePriceQuerySchema.parse(query);
 
   const saleUnit = await prisma.productSaleUnit.findFirst({
-    where: { id: saleUnitId, productId },
+    where: { id: saleUnitId, productId, shopId },
     select: { id: true, salePrice: true },
   });
   if (!saleUnit) throw new DomainError(`Sale unit ${saleUnitId} not found for product ${productId}`, "NOT_FOUND");
@@ -93,7 +93,7 @@ export async function resolvePrice(productId: Id, query: { saleUnitId: string; q
 
   // Best slab = greatest minQty that is ≤ qty (one indexed query, ordered desc).
   const slab = await prisma.priceSlab.findFirst({
-    where: { saleUnitId, minQty: { lte: qtyDec } },
+    where: { saleUnitId, minQty: { lte: qtyDec }, shopId },
     orderBy: { minQty: "desc" },
     select: { minQty: true, pricePerSaleUnit: true },
   });
@@ -111,9 +111,9 @@ export async function resolvePrice(productId: Id, query: { saleUnitId: string; q
 }
 
 /** List slabs for a sale unit (admin editor + storefront display). */
-export async function listPriceSlabs(saleUnitId: Id): Promise<PriceSlabDTO[]> {
+export async function listPriceSlabs(shopId: string, saleUnitId: Id): Promise<PriceSlabDTO[]> {
   const rows = await prisma.priceSlab.findMany({
-    where: { saleUnitId },
+    where: { saleUnitId, shopId },
     orderBy: { minQty: "asc" },
     select: { id: true, saleUnitId: true, minQty: true, pricePerSaleUnit: true },
   });
@@ -136,6 +136,7 @@ export async function setPriceSlabs(
   ctx: MutationCtx,
 ): Promise<PriceSlabDTO[]> {
   requirePermission(ctx.session, "pricing.write");
+  const shopId = requireShop(ctx.session);
   const data = setPriceSlabsSchema.parse(input);
 
   const minQtys = new Set<string>();
@@ -146,15 +147,16 @@ export async function setPriceSlabs(
 
   await runTx(async (tx) => {
     const su = await tx.productSaleUnit.findFirst({
-      where: { id: data.saleUnitId, productId },
+      where: { id: data.saleUnitId, productId, shopId },
       select: { id: true },
     });
     if (!su) throw new DomainError(`Sale unit ${data.saleUnitId} not found for product ${productId}`, "NOT_FOUND");
 
-    await tx.priceSlab.deleteMany({ where: { saleUnitId: data.saleUnitId } });
+    await tx.priceSlab.deleteMany({ where: { saleUnitId: data.saleUnitId, shopId } });
     if (data.slabs.length > 0) {
       await tx.priceSlab.createMany({
         data: data.slabs.map((s) => ({
+          shopId,
           saleUnitId: data.saleUnitId,
           minQty: new Prisma.Decimal(s.minQty),
           pricePerSaleUnit: fromPaise(s.pricePerSaleUnit),
@@ -162,6 +164,7 @@ export async function setPriceSlabs(
       });
     }
     await audit(tx, {
+      shopId,
       actorStaffId: ctx.session.userId,
       roleAtTime: ctx.session.roles?.[0] ?? null,
       permissionUsed: "pricing.write",
@@ -173,7 +176,7 @@ export async function setPriceSlabs(
     });
   });
 
-  return listPriceSlabs(data.saleUnitId);
+  return listPriceSlabs(shopId, data.saleUnitId);
 }
 
 /** Edit a single slab's minQty / price (pricing.write + audit). */
@@ -183,10 +186,11 @@ export async function editPriceSlab(
   ctx: MutationCtx,
 ): Promise<PriceSlabDTO> {
   requirePermission(ctx.session, "pricing.write");
+  const shopId = requireShop(ctx.session);
   const data = editPriceSlabSchema.parse(input);
 
   const updated = await runTx(async (tx) => {
-    const before = await tx.priceSlab.findUnique({ where: { id: slabId } });
+    const before = await tx.priceSlab.findFirst({ where: { id: slabId, shopId } });
     if (!before) throw new DomainError(`Slab ${slabId} not found`, "NOT_FOUND");
     const row = await tx.priceSlab.update({
       where: { id: slabId },
@@ -198,6 +202,7 @@ export async function editPriceSlab(
       select: { id: true, saleUnitId: true, minQty: true, pricePerSaleUnit: true },
     });
     await audit(tx, {
+      shopId,
       actorStaffId: ctx.session.userId,
       roleAtTime: ctx.session.roles?.[0] ?? null,
       permissionUsed: "pricing.write",

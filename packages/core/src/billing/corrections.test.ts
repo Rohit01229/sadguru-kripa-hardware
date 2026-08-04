@@ -28,7 +28,7 @@ function D(v: string | number) {
 function makeTx() {
   return {
     invoice: {
-      findUnique: vi.fn(async () => h.invoiceFixture),
+      findFirst: vi.fn(async () => h.invoiceFixture),
       update: vi.fn(async () => {
         record("invoice.update", "update");
         return { id: "inv_1" };
@@ -130,7 +130,7 @@ vi.mock("../shared/db", async () => {
   const actual = await vi.importActual<typeof DecimalModule>("decimal.js");
   return {
     prisma: {
-      invoice: { findUnique: vi.fn(async () => cancelledReadback()) },
+      invoice: { findFirst: vi.fn(async () => cancelledReadback()) },
       creditNote: { findMany: vi.fn(async () => []) },
     },
     Prisma: { Decimal: actual.default, PrismaClientKnownRequestError: class {} },
@@ -144,6 +144,7 @@ const ownerCtx = {
   session: {
     userId: "owner_1",
     realm: "STAFF" as const,
+    shopId: "shop_test",
     roles: ["OWNER"],
     permissions: ["bill.cancel", "bill.creditnote.create"],
   },
@@ -155,6 +156,7 @@ const cashierCtx = {
   session: {
     userId: "cashier_1",
     realm: "STAFF" as const,
+    shopId: "shop_test",
     roles: ["CASHIER"],
     permissions: ["bill.pakka.create", "bill.creditnote.create"],
   },

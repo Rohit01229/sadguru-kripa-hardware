@@ -7,10 +7,11 @@
 // this adds the FULL config read + the guarded write the admin screen needs.
 import { Prisma, prisma, runTx } from "../shared/db";
 import { audit } from "../shared/audit";
-import { requirePermission, type Session } from "../shared/rbac";
+import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";
 import { toPaise, fromPaise } from "../shared/money";
 import { updateStoreConfigSchema, type UpdateStoreConfigInput } from "./schema";
+import { billThemeSchema, readBillTheme, type BillTheme } from "./billTheme";
 
 export interface SettingsCtx {
   session: Session;
@@ -74,9 +75,9 @@ function toDTO(s: {
   };
 }
 
-/** Full StoreConfig (settings.read enforced at transport). Null if not seeded. */
-export async function getFullStoreConfig(): Promise<FullStoreConfigDTO | null> {
-  const s = await prisma.storeConfig.findUnique({ where: { id: "default" } });
+/** Full StoreConfig for the caller's shop (settings.read enforced at transport). Null if not seeded. */
+export async function getFullStoreConfig(shopId: string): Promise<FullStoreConfigDTO | null> {
+  const s = await prisma.storeConfig.findUnique({ where: { shopId } });
   return s ? toDTO(s) : null;
 }
 
@@ -91,10 +92,11 @@ export async function updateStoreConfig(
   ctx: SettingsCtx,
 ): Promise<FullStoreConfigDTO> {
   requirePermission(ctx.session, "settings.write");
+  const shopId = requireShop(ctx.session);
   const data = updateStoreConfigSchema.parse(input);
 
   const updated = await runTx(async (tx) => {
-    const before = await tx.storeConfig.findUnique({ where: { id: "default" } });
+    const before = await tx.storeConfig.findUnique({ where: { shopId } });
     if (!before) throw new DomainError("StoreConfig not initialised", "NOT_FOUND");
 
     const patch: Prisma.StoreConfigUpdateInput = {};
@@ -112,14 +114,15 @@ export async function updateStoreConfig(
     if (data.reservationTtlMinutes !== undefined) patch.reservationTtlMinutes = data.reservationTtlMinutes;
     if (data.gstRoundingMode !== undefined) patch.gstRoundingMode = data.gstRoundingMode;
 
-    const s = await tx.storeConfig.update({ where: { id: "default" }, data: patch });
+    const s = await tx.storeConfig.update({ where: { shopId }, data: patch });
 
     await audit(tx, {
+      shopId,
       ...auditMeta(ctx.session),
       permissionUsed: "settings.write",
       action: "settings.update",
       targetType: "StoreConfig",
-      targetId: "default",
+      targetId: before.id,
       before: {
         name: before.name,
         gstin: before.gstin,
@@ -137,5 +140,55 @@ export async function updateStoreConfig(
   return toDTO(updated);
 }
 
+/**
+ * The shop's bill theme (19 §7). Never throws on bad stored JSON — a theme is cosmetic,
+ * so a corrupt or future-version blob falls back to the defaults rather than breaking
+ * every print. Returns the defaults for a shop that has never opened the editor.
+ */
+export async function getBillTheme(shopId: string): Promise<BillTheme> {
+  const row = await prisma.storeConfig.findUnique({
+    where: { shopId },
+    select: { billTheme: true },
+  });
+  return readBillTheme(row?.billTheme ?? null);
+}
+
+/**
+ * Save the shop's bill theme. Guarded by settings.write (owner-only) and audited in the
+ * same transaction as the write, exactly like every other settings change (10 §7).
+ * The Zod parse is what makes the stored JSON safe: unknown keys are dropped, numbers
+ * clamped, enums closed — so nothing outside the schema can reach the renderer.
+ */
+export async function updateBillTheme(input: unknown, ctx: SettingsCtx): Promise<BillTheme> {
+  requirePermission(ctx.session, "settings.write");
+  const shopId = requireShop(ctx.session);
+  const theme = billThemeSchema.parse(input);
+
+  await runTx(async (tx) => {
+    const before = await tx.storeConfig.findUnique({
+      where: { shopId },
+      select: { id: true, billTheme: true },
+    });
+    if (!before) throw new DomainError("StoreConfig not initialised", "NOT_FOUND");
+
+    await tx.storeConfig.update({ where: { shopId }, data: { billTheme: theme } });
+
+    await audit(tx, {
+      ...auditMeta(ctx.session),
+      shopId,
+      permissionUsed: "settings.write",
+      action: "settings.billTheme.update",
+      targetType: "StoreConfig",
+      targetId: before.id,
+      before: { billTheme: before.billTheme ?? null },
+      after: { billTheme: theme },
+      requestId: ctx.requestId,
+    });
+  });
+
+  return theme;
+}
+
 // Re-export the settings Zod surface so transport imports validation from @hardware/core only.
 export * from "./schema";
+export * from "./billTheme";

@@ -5,6 +5,17 @@
 // Supplier/GoodsReceipt/GrnLine/SupplierPayment, Address, LedgerEntry,
 // Invoice/InvoiceLine/Payment, CreditNoteCounter/CreditNote/CreditNoteLine,
 // Order/OrderLine, ProcessedWebhook.
+//
+// MULTI-TENANCY (P0 — docs/architecture/17): every business row carries a `shopId`
+// (a bare indexed scalar — NO Prisma relation and NO DB-level FK, so the schema stays
+// the single source of truth with no drift and models stay clean; tenant integrity is
+// guaranteed by trusted server code, which only ever sets `shopId` from a validated
+// session). `shopId` is NOT NULL on every business table (exceptions: ProcessedWebhook
+// and IdempotencyKey — operational tables set at times when no shop is in scope).
+// Global uniques are composite per shop (`@@unique([shopId, sku|name|code|…])`), and
+// StoreConfig + the invoice/credit-note counters are keyed per shop. Applied to the DB
+// via a two-step migration (expand: add nullable column + backfill Shop #1; contract:
+// NOT NULL + composite constraints) — see docs/architecture/17 §5.
 
 generator client {
   provider        = "prisma-client-js"
@@ -103,9 +114,25 @@ enum PaymentStatus {
   REFUNDED
 }
 
+// ──────────────────── Tenant root: SHOP ────────────────────
+// The tenant. The platform super-admin creates one Shop per hardware store; every
+// business row carries this shop's id. `slug` is the future routing key
+// (subdomain/path). `plan`/`status` are lightweight placeholders until the full
+// Plan/Subscription models arrive (P4).
+model Shop {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  status    String   @default("ACTIVE") // ACTIVE | SUSPENDED
+  plan      String   @default("FREE") // placeholder until Plan/Subscription (P4)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // ──────────────────── Auth realm: STAFF ────────────────────
 model StaffUser {
   id            String         @id @default(cuid())
+  shopId        String // the shop this staff user belongs to (NOT NULL after contract)
   email         String         @unique
   passwordHash  String
   name          String
@@ -116,6 +143,8 @@ model StaffUser {
   totp          StaffTotp?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+
+  @@index([shopId])
 }
 
 model StaffSession {
@@ -139,6 +168,7 @@ model StaffTotp {
 // ──────────────────── Auth realm: CUSTOMER ────────────────────
 model Customer {
   id          String           @id @default(cuid())
+  shopId      String // the shop this customer belongs to (NOT NULL after contract)
   name        String
   phone       String?
   gstin       String?
@@ -152,6 +182,7 @@ model Customer {
   createdAt   DateTime         @default(now())
 
   @@index([phone])
+  @@index([shopId])
 }
 
 model CustomerAccount {
@@ -224,6 +255,7 @@ model UserRole {
 // ──────────────────────── Audit ────────────────────────
 model AuditLog {
   id             String   @id @default(cuid())
+  shopId         String // tenant scope (NOT NULL after contract; SYSTEM jobs derive it per row)
   actorStaffId   String?
   roleAtTime     String?
   permissionUsed String?
@@ -237,44 +269,57 @@ model AuditLog {
 
   @@index([action, createdAt])
   @@index([targetType, targetId])
+  @@index([shopId])
 }
 
 // ──────────────────── Catalog & Unit-of-Measure ────────────────────
 model Category {
   id       String     @id @default(cuid())
+  shopId   String
   name     String
   parentId String?
   parent   Category?  @relation("Sub", fields: [parentId], references: [id])
   children Category[] @relation("Sub")
   products Product[]
+
+  @@index([shopId])
 }
 
 model Brand {
   id       String    @id @default(cuid())
-  name     String    @unique
+  shopId   String
+  name     String
   products Product[]
 
+  @@unique([shopId, name])
   @@index([name(ops: raw("gin_trgm_ops"))], map: "Brand_name_trgm_idx", type: Gin)
+  @@index([shopId])
 }
 
 model Unit {
   id           String            @id @default(cuid())
-  code         String            @unique // "m","coil","L","bucket","pc","box","kg","bag"
+  shopId       String
+  code         String // "m","coil","L","bucket","pc","box","kg","bag"
   name         String
   kind         UnitKind
   baseProducts Product[]         @relation("BaseUnit")
   saleUnits    ProductSaleUnit[]
+
+  @@unique([shopId, code])
+  @@index([shopId])
 }
 
 model Product {
   id              String            @id @default(cuid())
-  sku             String            @unique
+  shopId          String
+  sku             String
   name            String
   brandId         String?
   brand           Brand?            @relation(fields: [brandId], references: [id])
   categoryId      String
   category        Category          @relation(fields: [categoryId], references: [id])
   hsnCode         String?
+  barcode         String? // scanned EAN/UPC or shop-printed label (optional; not unique)
   baseUnitId      String
   baseUnit        Unit              @relation("BaseUnit", fields: [baseUnitId], references: [id])
   costPerBaseUnit Decimal           @db.Decimal(14, 2)
@@ -293,13 +338,17 @@ model Product {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
+  @@unique([shopId, sku])
   @@index([categoryId])
   @@index([name(ops: raw("gin_trgm_ops"))], map: "Product_name_trgm_idx", type: Gin)
   @@index([sku(ops: raw("gin_trgm_ops"))], map: "Product_sku_trgm_idx", type: Gin)
+  @@index([shopId])
+  @@index([shopId, barcode])
 }
 
 model ProductSaleUnit {
   id           String      @id @default(cuid())
+  shopId       String
   productId    String
   product      Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   unitId       String
@@ -311,18 +360,23 @@ model ProductSaleUnit {
   priceSlabs   PriceSlab[]
 
   @@unique([productId, unitId])
+  @@index([shopId])
 }
 
 model ProductStock {
   productId String   @id
+  shopId    String
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   onHand    Decimal  @default(0) @db.Decimal(14, 3) // base units
   reserved  Decimal  @default(0) @db.Decimal(14, 3)
   updatedAt DateTime @updatedAt
+
+  @@index([shopId])
 }
 
 model StockMovement {
   id           String       @id @default(cuid())
+  shopId       String
   productId    String
   product      Product      @relation(fields: [productId], references: [id])
   batchId      String? // FK added with Batch model later
@@ -336,21 +390,32 @@ model StockMovement {
 
   @@index([productId, createdAt])
   @@index([kind])
+  @@index([shopId])
 }
 
 // ──────────────────── Counters & settings ────────────────────
 model InvoiceCounter {
-  fy     String @id // "2026-27"
+  // Gapless invoice sequence, now PER SHOP (17). The composite PK is the row the
+  // `UPDATE … RETURNING` locks, so each shop has an independent, gapless series.
+  shopId String
+  fy     String // "2026-27"
   lastNo Int    @default(0)
+
+  @@id([shopId, fy])
 }
 
 model CreditNoteCounter {
-  fy     String @id // "2026-27" — own gapless series (13 §8)
+  shopId String
+  fy     String // "2026-27" — own gapless series per shop (13 §8, 17)
   lastNo Int    @default(0)
+
+  @@id([shopId, fy])
 }
 
 model StoreConfig {
-  id                    String   @id @default("default")
+  // One row per shop (17). `id` stays the PK (cuid); `shopId` is the lookup key.
+  id                    String   @id @default(cuid())
+  shopId                String   @unique
   name                  String
   gstin                 String?
   homeState             String // intra/inter-state decision (03 §8)
@@ -363,23 +428,29 @@ model StoreConfig {
   freeDeliveryThreshold Decimal? @db.Decimal(14, 2)
   reservationTtlMinutes Int      @default(30)
   gstRoundingMode       String   @default("PER_INVOICE")
+  /// Bill theme JSON (19 §7) — colours/fonts/toggles for printed bills. Cosmetic
+  /// only: GST-mandatory elements are not expressible as hideable. Null = defaults.
+  billTheme             Json?
 }
 
 // ──────────────────── Pricing & batches (13 §4) ────────────────────
 model PriceSlab {
   // quantity-break (bulk) pricing on a sale unit
   id               String          @id @default(cuid())
+  shopId           String
   saleUnitId       String
   saleUnit         ProductSaleUnit @relation(fields: [saleUnitId], references: [id], onDelete: Cascade)
   minQty           Decimal         @db.Decimal(14, 3)
   pricePerSaleUnit Decimal         @db.Decimal(14, 2)
 
   @@index([saleUnitId, minQty])
+  @@index([shopId])
 }
 
 model Batch {
   // batch + optional expiry / MRP-wise on-hand for FIFO/expiry
   id         String    @id @default(cuid())
+  shopId     String
   productId  String
   product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   code       String
@@ -390,11 +461,13 @@ model Batch {
 
   @@unique([productId, code])
   @@index([expiryDate])
+  @@index([shopId])
 }
 
 // ──────────────────── Reservations (13 §5) ────────────────────
 model Reservation {
   id        String            @id @default(cuid())
+  shopId    String
   orderId   String
   order     Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId String
@@ -405,11 +478,13 @@ model Reservation {
 
   @@index([status, expiresAt])
   @@index([productId])
+  @@index([shopId])
 }
 
 // ──────────────────── Suppliers & purchasing (13 §6) ────────────────────
 model Supplier {
   id        String            @id @default(cuid())
+  shopId    String
   name      String
   gstin     String?
   phone     String?
@@ -417,11 +492,14 @@ model Supplier {
   receipts  GoodsReceipt[]
   payments  SupplierPayment[]
   createdAt DateTime          @default(now())
+
+  @@index([shopId])
 }
 
 model GoodsReceipt {
   // GRN
   id          String    @id @default(cuid())
+  shopId      String
   supplierId  String?
   supplier    Supplier? @relation(fields: [supplierId], references: [id])
   refNo       String?
@@ -429,31 +507,40 @@ model GoodsReceipt {
   note        String?
   lines       GrnLine[]
   createdById String?
+
+  @@index([shopId])
 }
 
 model GrnLine {
   id              String       @id @default(cuid())
+  shopId          String
   grnId           String
   grn             GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
   productId       String
   batchId         String?
   baseQty         Decimal      @db.Decimal(14, 3)
   costPerBaseUnit Decimal      @db.Decimal(14, 2)
+
+  @@index([shopId])
 }
 
 model SupplierPayment {
   // payables [N]
   id         String   @id @default(cuid())
+  shopId     String
   supplierId String
   supplier   Supplier @relation(fields: [supplierId], references: [id])
   amount     Decimal  @db.Decimal(14, 2)
   mode       String
   date       DateTime @default(now())
+
+  @@index([shopId])
 }
 
 // ──────────────────── Parties: addresses & khata ledger (13 §7) ────────────────────
 model Address {
   id         String   @id @default(cuid())
+  shopId     String
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   line1      String
@@ -462,10 +549,13 @@ model Address {
   state      String // place-of-supply driver (03 §8)
   pincode    String
   isDefault  Boolean  @default(false)
+
+  @@index([shopId])
 }
 
 model LedgerEntry {
   id         String          @id @default(cuid())
+  shopId     String
   customerId String
   customer   Customer        @relation(fields: [customerId], references: [id])
   type       LedgerEntryType
@@ -476,11 +566,13 @@ model LedgerEntry {
   createdAt  DateTime        @default(now())
 
   @@index([customerId, createdAt])
+  @@index([shopId])
 }
 
 // ──────────────────── Billing & GST (13 §8) ────────────────────
 model Invoice {
   id                 String        @id @default(cuid())
+  shopId             String
   fy                 String // "2026-27"
   invoiceNo          String // "2026-27/000124"
   customerId         String?
@@ -503,14 +595,17 @@ model Invoice {
   lines              InvoiceLine[]
   payments           Payment[]
   creditNotes        CreditNote[]
+  ewayBill           EwayBill?
   createdAt          DateTime      @default(now())
 
-  @@unique([fy, invoiceNo]) // gapless backstop (03 §7)
+  @@unique([shopId, fy, invoiceNo]) // gapless invoice series, per shop (03 §7, 17)
   @@index([customerId])
+  @@index([shopId])
 }
 
 model InvoiceLine {
   id           String  @id @default(cuid())
+  shopId       String
   invoiceId    String
   invoice      Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   productId    String
@@ -525,10 +620,13 @@ model InvoiceLine {
   cgst         Decimal @default(0) @db.Decimal(14, 2)
   sgst         Decimal @default(0) @db.Decimal(14, 2)
   igst         Decimal @default(0) @db.Decimal(14, 2)
+
+  @@index([shopId])
 }
 
 model Payment {
   id         String      @id @default(cuid())
+  shopId     String
   invoiceId  String?
   invoice    Invoice?    @relation(fields: [invoiceId], references: [id])
   orderId    String?
@@ -539,10 +637,12 @@ model Payment {
   date       DateTime    @default(now())
 
   @@index([invoiceId])
+  @@index([shopId])
 }
 
 model CreditNote {
   id           String           @id @default(cuid())
+  shopId       String
   fy           String
   creditNoteNo String // own gapless series
   invoiceId    String
@@ -557,11 +657,13 @@ model CreditNote {
   lines        CreditNoteLine[]
   createdAt    DateTime         @default(now())
 
-  @@unique([fy, creditNoteNo])
+  @@unique([shopId, fy, creditNoteNo]) // gapless credit-note series, per shop (17)
+  @@index([shopId])
 }
 
 model CreditNoteLine {
   id           String     @id @default(cuid())
+  shopId       String
   creditNoteId String
   creditNote   CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
   productId    String
@@ -570,12 +672,15 @@ model CreditNoteLine {
   baseQty      Decimal    @db.Decimal(14, 3)
   taxableValue Decimal    @db.Decimal(14, 2)
   gstRate      Decimal    @db.Decimal(5, 2)
+
+  @@index([shopId])
 }
 
 // ──────────────────── Orders & ecommerce (13 §9) ────────────────────
 model Order {
   id                 String         @id @default(cuid())
-  orderNo            String         @unique
+  shopId             String
+  orderNo            String
   customerId         String
   customer           Customer       @relation(fields: [customerId], references: [id])
   status             OrderStatus    @default(PENDING_PAYMENT)
@@ -591,12 +696,15 @@ model Order {
   lines              OrderLine[]
   createdAt          DateTime       @default(now())
 
+  @@unique([shopId, orderNo])
   @@index([customerId])
   @@index([status])
+  @@index([shopId])
 }
 
 model OrderLine {
   id         String  @id @default(cuid())
+  shopId     String
   orderId    String
   order      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId  String
@@ -604,15 +712,20 @@ model OrderLine {
   saleQty    Decimal @db.Decimal(14, 3)
   baseQty    Decimal @db.Decimal(14, 3)
   unitPrice  Decimal @db.Decimal(14, 2)
+
+  @@index([shopId])
 }
 
 model ProcessedWebhook {
   // idempotency (03 §9)
   id        String   @id @default(cuid())
-  eventId   String   @unique // Razorpay event id
+  shopId    String? // derived from the matched Order when a webhook is processed (nullable — set post-lookup)
+  eventId   String   @unique // Razorpay event id (stays globally unique — gateway-guaranteed)
   paymentId String?
   type      String?
   createdAt DateTime @default(now())
+
+  @@index([shopId])
 }
 
 // ──────────────────── Idempotency (04 §5) ────────────────────
@@ -622,6 +735,7 @@ model ProcessedWebhook {
 // GRN in S3 (stock-moving); reused by pakka/convert/place-order/payment/CN.
 model IdempotencyKey {
   id          String   @id @default(cuid())
+  shopId      String? // not set in P0 — principalId already binds the key to one shop
   key         String
   principalId String // staff or customer id that issued the key
   route       String // logical route, e.g. "POST /api/grn"
@@ -632,4 +746,70 @@ model IdempotencyKey {
 
   @@unique([key, principalId, route])
   @@index([createdAt])
+  @@index([shopId])
+}
+
+// ──────────────────── e-Way bill (docs/architecture/20) ────────────────────
+// Required for moving goods above a value threshold (₹50,000 inter-state; higher in
+// some states intra-state) REGARDLESS of turnover — so unlike e-invoicing this applies
+// to every shop today. Part-A is the consignment; Part-B is the vehicle. Part-B may be
+// filled later, and the bill's validity only starts once it is.
+//
+// We do NOT call the government API here (that needs GSP credentials + IP whitelisting
+// — see doc 20). This records what the shop needs, produces the portal's upload JSON,
+// and stores the number once issued.
+enum EwayBillStatus {
+  DRAFT // captured here, not yet on the portal
+  GENERATED // portal issued a number
+  CANCELLED // cancelled on the portal (24h window)
+}
+
+enum TransportMode {
+  ROAD
+  RAIL
+  AIR
+  SHIP
+}
+
+model EwayBill {
+  id        String         @id @default(cuid())
+  shopId    String
+  invoiceId String         @unique // one live e-way bill per invoice
+  invoice   Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  status    EwayBillStatus @default(DRAFT)
+
+  // ── Part-A: the consignment ──
+  /// Value used for the threshold test (paise) — snapshot, so a later edit cannot
+  /// retro-justify a missing bill.
+  consignmentValue Int
+  fromPincode      String
+  toPincode        String
+  /// Numeric GST state codes, as the portal expects.
+  fromStateCode    String
+  toStateCode      String
+  /// Approximate road distance in km — drives validity.
+  distanceKm       Int?
+
+  // ── Part-B: the vehicle (may arrive later) ──
+  transportMode    TransportMode?
+  vehicleNumber    String?
+  /// true = over-dimensional cargo, which validates at 1 day per 20 km, not 200.
+  overDimensional  Boolean        @default(false)
+  transporterGstin String?
+  transporterName  String?
+  transportDocNo   String?
+  transportDocDate DateTime?
+
+  // ── Portal result ──
+  ewbNo           String?
+  ewbDate         DateTime?
+  validUntil      DateTime?
+  cancelledReason String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([shopId])
+  @@index([shopId, status])
 }

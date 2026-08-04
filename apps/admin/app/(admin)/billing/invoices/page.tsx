@@ -16,7 +16,7 @@ import {
   formatMoney,
   formatDate,
 } from "@hardware/ui";
-import { getStaffSession } from "../../../../lib/session";
+import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { BillingNav, Forbid } from "../nav";
 import { InvoiceFilterBar } from "./InvoiceFilterBar";
 
@@ -61,8 +61,9 @@ export default async function InvoicesPage({
   // no longer eagerly load the whole directory here — that was the limit:500 ZodError
   // crash and silently dropped customers past the cap. We only resolve the ONE already-
   // selected customer (if any) so the picker can show its name on reload.
+  const shopId = await requireShopId();
   const [page, selectedCustomer] = await Promise.all([
-    listInvoices({
+    listInvoices(shopId, {
       status,
       from: sp.from || undefined,
       to: sp.to || undefined,
@@ -70,7 +71,7 @@ export default async function InvoicesPage({
       cursor: sp.cursor,
       limit: 50,
     }),
-    mayReadCustomers && sp.customerId ? getCustomer(sp.customerId) : Promise.resolve(null),
+    mayReadCustomers && sp.customerId ? getCustomer(shopId, sp.customerId) : Promise.resolve(null),
   ]);
 
   const hasFilters = Boolean(status || sp.from || sp.to || sp.customerId);
