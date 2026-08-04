@@ -10,6 +10,9 @@ import {
   createAuthLimiter,
   checkLimit,
   clientIp,
+  verifyDevicePin,
+  forgetDevice,
+  DEVICE_COOKIE,
 } from "@hardware/auth";
 
 // Staff login server action (transport layer): Zod-validate, rate-limit per-IP +
@@ -84,4 +87,50 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   });
 
   redirect("/dashboard");
+}
+
+// ── Device PIN (fast re-login) ──
+// Password once per device, then four digits. The PIN is only ever accepted alongside
+// the device cookie it was set for, so a leaked PIN is useless on another device.
+
+export interface PinLoginState {
+  error?: string;
+  attemptsLeft?: number;
+  locked?: boolean;
+}
+
+/**
+ * Sign in with the device PIN. Creates exactly the same session a password login would
+ * — the PIN is a faster second path to the same place, not a lesser one.
+ */
+export async function pinLoginAction(_prev: PinLoginState, formData: FormData): Promise<PinLoginState> {
+  const pin = String(formData.get("pin") ?? "");
+  const store = await cookies();
+  const deviceToken = store.get(DEVICE_COOKIE)?.value;
+
+  const result = await verifyDevicePin(deviceToken, pin);
+  if (!result.ok || !result.staffUserId) {
+    if (result.locked) {
+      return { locked: true, error: "Too many wrong PINs. Please sign in with your password." };
+    }
+    return {
+      error: "That PIN is not right.",
+      attemptsLeft: result.attemptsLeft,
+    };
+  }
+
+  const cookie = await createStaffSession(result.staffUserId);
+  store.set(cookie.name, cookie.value, {
+    ...sessionCookieOptions(process.env.NODE_ENV === "production"),
+    expires: cookie.expires,
+  });
+  redirect("/dashboard");
+}
+
+/** Forget this device, so the next visit asks for the password. */
+export async function forgetDeviceAction(): Promise<void> {
+  const store = await cookies();
+  await forgetDevice(store.get(DEVICE_COOKIE)?.value);
+  store.delete(DEVICE_COOKIE);
+  redirect("/login");
 }

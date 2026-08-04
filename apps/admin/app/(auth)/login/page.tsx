@@ -1,5 +1,7 @@
+import { cookies } from "next/headers";
 import { getPrimaryShopId, getStoreConfig } from "@hardware/core";
-import { LoginForm } from "./LoginForm";
+import { getPinStatus, DEVICE_COOKIE } from "@hardware/auth";
+import { LoginSwitcher } from "./LoginSwitcher";
 
 // Staff sign-in page. Server component so the heading can reflect the configurable
 // shop name (StoreConfig) instead of a hardcoded string; the interactive form lives
@@ -14,5 +16,17 @@ export default async function LoginPage() {
     // StoreConfig unavailable — keep the fallback heading.
   }
 
-  return <LoginForm storeName={storeName} />;
+  // If this device has been remembered, offer the PIN pad instead of the password form.
+  // Only the display name is exposed pre-auth — enough to greet them, not enough to
+  // tell a stranger holding the device which account it belongs to.
+  const store = await cookies();
+  const pin = await getPinStatus(store.get(DEVICE_COOKIE)?.value);
+
+  return (
+    <LoginSwitcher
+      storeName={storeName}
+      pinAvailable={pin.available}
+      staffName={pin.staffName}
+    />
+  );
 }

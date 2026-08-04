@@ -4,5 +4,6 @@ export * from "./password";
 export * from "./tokens";
 export * from "./ratelimit";
 export * from "./sessions";
+export * from "./pin"; // device PIN: password once per device, then 4 digits
 export * from "./flows";
 export * from "./getSession";

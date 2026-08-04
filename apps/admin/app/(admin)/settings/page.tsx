@@ -49,6 +49,19 @@ export default async function SettingsPage() {
         title={t("page.title")}
         description={t("page.description")}
       />
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <p className="text-sm font-medium">Quick sign-in</p>
+            <p className="text-xs text-muted-foreground">
+              Use a 4-digit PIN on this device instead of your password.
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/settings/pin">Set up</Link>
+          </Button>
+        </CardContent>
+      </Card>
       {canWrite && (
         <Card>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">

@@ -172,6 +172,7 @@ model StaffUser {
   emailVerified DateTime?
   roles         UserRole[]
   sessions      StaffSession[]
+  pins          StaffPin[]
   totp          StaffTotp?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -195,6 +196,40 @@ model StaffTotp {
   secretEnc     String // encrypted at rest
   recoveryCodes String[] // hashed
   enabled       Boolean   @default(false) // scaffolded, off in v1
+}
+
+// ──────────────────── Device PIN (fast re-login) ────────────────────
+// A shopkeeper cannot type a full password twenty times a day on a counter tablet, and
+// SMS OTP costs money per login and needs DLT approval before it can send anything. So:
+// password ONCE per device, then a 4-digit PIN.
+//
+// SECURITY MODEL — the PIN is never an authenticator on its own. It is only accepted
+// alongside a device token this row was created for, so it is genuinely two factors:
+// the device (something you have) and the PIN (something you know). A leaked 4-digit PIN
+// is useless without the device cookie, and a stolen device cookie is useless without
+// the PIN. Both are stored HASHED; neither is recoverable from the database.
+//
+// 4 digits is only 10,000 combinations, so the attempt counter below is load-bearing,
+// not a nicety: it locks the PIN after a few misses and forces a full password sign-in.
+model StaffPin {
+  id          String    @id @default(cuid())
+  staffUserId String
+  staffUser   StaffUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the opaque device token held in the `hw.device` cookie. Unique, so one
+  /// row per device, and the raw token never touches the database.
+  deviceHash  String    @unique
+  /// argon2id, exactly like a password — a 4-digit PIN is low-entropy, so it must never
+  /// be stored in a form that a database leak could reverse.
+  pinHash     String
+  /// Shown when managing devices, e.g. "Counter tablet".
+  label       String?
+  failedCount Int       @default(0)
+  /// Set once failedCount trips the limit; the PIN is refused until a password sign-in.
+  lockedUntil DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([staffUserId])
 }
 
 // ──────────────────── Auth realm: CUSTOMER ────────────────────

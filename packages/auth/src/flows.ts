@@ -182,6 +182,9 @@ export async function confirmPasswordReset(
       await tx.staffUser.update({ where: { id: rec.subjectId }, data: { passwordHash } });
       // Revoke all staff sessions on password change (logout-everywhere).
       await tx.staffSession.deleteMany({ where: { staffUserId: rec.subjectId } });
+      // And every device PIN: a PIN set under a compromised password must not outlive
+      // it, or the reset would leave the attacker a four-digit way back in.
+      await tx.staffPin.deleteMany({ where: { staffUserId: rec.subjectId } });
     } else {
       await tx.customerAccount.update({ where: { id: rec.subjectId }, data: { passwordHash } });
       await tx.customerSession.deleteMany({ where: { accountId: rec.subjectId } });
