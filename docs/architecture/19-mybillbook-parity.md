@@ -25,6 +25,7 @@ The nine parity items, in the order the user listed them:
 | + | **Estimate / Proforma / Delivery challan** + convert-to-bill | ✅ Done — see [21](21-presale-documents.md) |
 | + | **Expenses** (categories, GST split, month breakdown) | ✅ Done — see [21b](21b-expenses.md) |
 | + | **Purchase orders** + receive-into-GRN, incl. **partial receipt** | ✅ Done — see [21c](21c-purchase-orders.md) |
+| + | **Parties** — one customer + supplier directory with balances | ✅ Done — see [21d](21d-parties.md) |
 
 ---
 

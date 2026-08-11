@@ -17,7 +17,8 @@ import {
   formatDate,
 } from "@hardware/ui";
 import { getStaffSession, requireShopId } from "../../../../lib/session";
-import { LedgerNav, Forbid } from "../nav";
+import { Forbid } from "../nav";
+import { PartiesNav } from "../../parties/nav";
 import { RecordPaymentForm, ReminderButton } from "./LedgerActions";
 
 // Customer khata statement (S5): full ledger with running balance, aging buckets,
@@ -53,7 +54,7 @@ export default async function CustomerStatementPage({ params }: { params: Promis
 
   return (
     <div className="space-y-6">
-      <LedgerNav active="directory" />
+      <PartiesNav active="ledger" />
 
       <PageHeader
         breadcrumbs={[

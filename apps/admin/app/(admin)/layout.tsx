@@ -31,7 +31,18 @@ const NAV: NavDef[] = [
   // Billing: a shopkeeper writing a quote has not started a sale, and burying it under
   // the till is how myBillBook users lose it.
   { href: "/sales", label: "Estimates", iconKey: "salesdoc", visible: (s) => can(s, "bill.read") },
-  { href: "/ledger", label: "Ledger", iconKey: "ledger", visible: (s) => can(s, "ledger.read") },
+  // One directory of everyone the shop deals with (21d). Replaces the old "Ledger"
+  // entry: the khata is now a tab inside this section, because a shopkeeper looks up a
+  // PERSON and then asks what they owe — not the other way round.
+  {
+    href: "/parties",
+    label: "Parties",
+    iconKey: "parties",
+    // The khata lives at /ledger, inside this section's tab bar — claim it so the
+    // sidebar stays lit when the user is on it.
+    matchPrefixes: ["/ledger"],
+    visible: (s) => can(s, "customers.read") || can(s, "suppliers.read"),
+  },
   // Money OUT (21b). Sits beside the ledger (money in) rather than under Reports: a
   // shopkeeper records an expense as it happens, they do not go looking for a report.
   { href: "/expenses", label: "Expenses", iconKey: "expenses", visible: (s) => can(s, "expenses.read") },
@@ -50,7 +61,12 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // source-level fallback only. Permission gating is unchanged.
   const t = await getTranslations("common");
   const items: NavItem[] = NAV.filter((item) => item.visible(session)).map(
-    ({ href, iconKey }) => ({ href, iconKey, label: t(`nav.${iconKey}`) }),
+    ({ href, iconKey, matchPrefixes }) => ({
+      href,
+      iconKey,
+      matchPrefixes,
+      label: t(`nav.${iconKey}`),
+    }),
   );
 
   const role = session.roles?.[0] ?? "Staff";

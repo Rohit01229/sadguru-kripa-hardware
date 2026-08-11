@@ -17,7 +17,12 @@ import { SupplierForm } from "./SupplierForm";
 
 // Supplier directory (S3): list + create. Create needs suppliers.write; the form
 // is hidden without it (cosmetic) and the action re-checks server-side.
-export default async function SuppliersPage() {
+export default async function SuppliersPage({
+  searchParams,
+}: {
+  /** `?highlight=<id>` — arrived here from the parties directory (21d). */
+  searchParams: Promise<{ highlight?: string }>;
+}) {
   const session = await getStaffSession();
   if (!session) redirect("/login");
   try {
@@ -31,6 +36,10 @@ export default async function SuppliersPage() {
   const shopId = await requireShopId();
   const suppliers = await listSuppliers(shopId);
   const canWrite = can(session, "suppliers.write");
+  // Clicking a supplier in the parties directory lands here; mark the row so the eye
+  // finds it instead of re-scanning the list. A link that says "this one" and then
+  // shows an undifferentiated table is worse than no link.
+  const { highlight } = await searchParams;
 
   return (
     <div className="space-y-6">
@@ -65,7 +74,11 @@ export default async function SuppliersPage() {
             </TableHeader>
             <TableBody>
               {suppliers.map((s) => (
-                <TableRow key={s.id}>
+                <TableRow
+                  key={s.id}
+                  id={`supplier-${s.id}`}
+                  className={s.id === highlight ? "bg-primary/10" : undefined}
+                >
                   <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {s.gstin ?? "—"}

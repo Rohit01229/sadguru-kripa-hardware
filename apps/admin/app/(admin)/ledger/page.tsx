@@ -18,7 +18,8 @@ import {
   type DataTableColumn,
 } from "@hardware/ui";
 import { getStaffSession, requireShopId } from "../../../lib/session";
-import { LedgerNav, Forbid } from "./nav";
+import { Forbid } from "./nav";
+import { PartiesNav } from "../parties/nav";
 import { CustomerForm } from "./CustomerForm";
 import { LedgerFilterBar } from "./LedgerFilterBar";
 
@@ -141,7 +142,7 @@ export default async function LedgerDirectoryPage({
 
   return (
     <div className="space-y-6">
-      <LedgerNav active="directory" />
+      <PartiesNav active="ledger" />
 
       <PageHeader
         title={t("directory.title")}

@@ -444,6 +444,63 @@ export async function aging(shopId: string, customerId: Id, now: Date = new Date
 //  Record a khata receipt (part-payment) — idempotent (04 §5).
 // ════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Record what a customer already owed before this app existed (21d).
+ *
+ * A shop moving off a paper khata has real balances on day one; starting everyone at
+ * zero would make the very first statement wrong, and the shopkeeper would stop
+ * trusting the khata screen. This posts a single OPENING entry so the balance is a
+ * transaction on the statement — visible and explainable — rather than a hidden column.
+ *
+ * Refuses if the customer already has any ledger history: an "opening" balance added
+ * after trading has begun is not an opening balance, it is an unexplained adjustment,
+ * and there is a separate entry type for that.
+ */
+export async function setOpeningBalance(
+  customerId: Id,
+  amountPaise: number,
+  ctx: LedgerCtx,
+): Promise<{ customerId: Id; outstanding: number }> {
+  requirePermission(ctx.session, "ledger.write");
+  const shopId = requireShop(ctx.session);
+  if (!Number.isInteger(amountPaise) || amountPaise <= 0) {
+    throw new DomainError("Enter an opening balance greater than zero.", "INVALID_AMOUNT");
+  }
+
+  return await runTx(async (tx) => {
+    const customer = await tx.customer.findFirst({
+      where: { id: customerId, shopId },
+      select: { id: true },
+    });
+    if (!customer) throw new DomainError(`Customer ${customerId} not found`, "NOT_FOUND");
+
+    const existing = await tx.ledgerEntry.count({ where: { customerId, shopId } });
+    if (existing > 0) {
+      throw new DomainError(
+        "This customer already has khata entries, so an opening balance can no longer be set.",
+        "LEDGER_NOT_EMPTY",
+      );
+    }
+
+    await post(tx, shopId, customerId, "OPENING", fromPaise(amountPaise), {
+      note: "Opening balance",
+    });
+
+    await audit(tx, {
+      shopId,
+      ...auditMeta(ctx.session),
+      permissionUsed: "ledger.write",
+      action: "ledger.opening",
+      targetType: "Customer",
+      targetId: customerId,
+      after: { amount: amountPaise },
+      requestId: ctx.requestId,
+    });
+
+    return { customerId, outstanding: amountPaise };
+  });
+}
+
 export interface LedgerPaymentDTO {
   paymentId: Id;
   ledgerEntryId: Id;

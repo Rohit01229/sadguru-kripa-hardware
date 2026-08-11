@@ -36,6 +36,12 @@ export interface NavItem {
   href: string;
   label: string;
   iconKey: IconKey;
+  /**
+   * Extra path prefixes this entry owns. A section whose tab bar reaches routes
+   * outside its own folder (Parties → /ledger) would otherwise leave the sidebar with
+   * nothing highlighted, which reads as "you have navigated out of the app".
+   */
+  matchPrefixes?: string[];
 }
 
 export type IconKey =
@@ -44,7 +50,7 @@ export type IconKey =
   | "stock"
   | "billing"
   | "salesdoc"
-  | "ledger"
+  | "parties"
   | "expenses"
   | "orders"
   | "reports"
@@ -92,10 +98,12 @@ const navIcons: Record<IconKey, (props: IconProps) => React.ReactElement> = {
       <path d="M12 18v-6" />
     </Icon>
   ),
-  ledger: (p) => (
+  parties: (p) => (
     <Icon {...p}>
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </Icon>
   ),
   expenses: (p) => (
@@ -157,9 +165,10 @@ function Icon({ children, ...props }: IconProps) {
   );
 }
 
-function isActive(pathname: string, href: string): boolean {
+function isActive(pathname: string, href: string, extra: string[] = []): boolean {
   if (href === "/dashboard") return pathname === "/dashboard";
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const owns = (p: string) => pathname === p || pathname.startsWith(`${p}/`);
+  return owns(href) || extra.some(owns);
 }
 
 function Brand({ storeName }: { storeName: string }) {
@@ -183,7 +192,7 @@ function NavList({ items, pathname }: { items: NavItem[]; pathname: string }) {
         return (
           <SidebarNavItem
             key={item.href}
-            active={isActive(pathname, item.href)}
+            active={isActive(pathname, item.href, item.matchPrefixes)}
             icon={<ItemIcon />}
           >
             <Link href={item.href}>{item.label}</Link>
@@ -213,7 +222,7 @@ export function AdminShell({ items, user, logoutAction, storeName, children }: A
     setMobileOpen(false);
   }, [pathname]);
 
-  const current = items.find((i) => isActive(pathname, i.href));
+  const current = items.find((i) => isActive(pathname, i.href, i.matchPrefixes));
 
   const sidebar = (
     <Sidebar brand={<Brand storeName={storeName} />}>
