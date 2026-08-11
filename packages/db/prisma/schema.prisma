@@ -246,6 +246,7 @@ model Customer {
   invoices    Invoice[]
   orders      Order[]
   ledger      LedgerEntry[]
+  salesDocs   SalesDoc[]
   createdAt   DateTime         @default(now())
 
   @@index([phone])
@@ -402,6 +403,7 @@ model Product {
   batches         Batch[]
   stock           ProductStock?
   movements       StockMovement[]
+  salesDocLines   SalesDocLine[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -965,4 +967,114 @@ model SubscriptionPayment {
 
   @@index([shopId])
   @@index([subscriptionId])
+}
+
+// ──────────────────── Pre-sale documents (docs/architecture/21) ────────────────────
+// myBillBook's Estimate/Quotation, Proforma Invoice and Delivery Challan. All three
+// are the SAME document — a party, priced lines, GST maths, a total — differing only
+// in what they promise. So they are one table with a `kind`, not three near-copies.
+//
+// What separates them from Invoice, and why they are NOT rows in it:
+//   - They mint NO invoice number. The GST invoice series must stay gapless and
+//     mean "a tax invoice exists"; a quotation that never converts must not burn one.
+//   - They create NO tax liability, NO ledger entry and NO stock movement. Nothing
+//     has been sold yet. Stock moves when the doc is converted and the bill finalises.
+//   - They are freely editable and cancellable, which a finalised invoice is not.
+enum SalesDocKind {
+  QUOTATION // "Estimate / Quotation" — a price offer, usually with a validity date
+  PROFORMA // "Proforma Invoice" — a request for advance payment
+  DELIVERY_CHALLAN // Rule 55 — goods moving without a tax invoice yet
+}
+
+enum SalesDocStatus {
+  OPEN
+  CONVERTED // a tax invoice was raised from it (convertedInvoiceId)
+  CANCELLED
+}
+
+/// Own sequence per (shop, kind, FY) so each document type numbers from 1 the way a
+/// shopkeeper expects — QT/2026-27/000001 and DC/2026-27/000001 coexist.
+model SalesDocCounter {
+  shopId String
+  kind   SalesDocKind
+  fy     String
+  lastNo Int          @default(0)
+
+  @@id([shopId, kind, fy])
+}
+
+model SalesDoc {
+  id     String       @id @default(cuid())
+  shopId String
+  kind   SalesDocKind
+  fy     String
+  docNo  String // "QT/2026-27/000012"
+
+  customerId        String?
+  customer          Customer? @relation(fields: [customerId], references: [id])
+  /// Snapshots, exactly as on Invoice: the document must reprint as it was handed
+  /// over, even if the party is later renamed or their GSTIN corrected.
+  customerNameSnap  String?
+  customerGstinSnap String?
+  customerPhoneSnap String?
+
+  placeOfSupplyState String
+  date               DateTime  @default(now())
+  /// Quotations only — "Valid till". Past it the doc is shown as expired; it is NOT a
+  /// separate status, because expiry is a function of the clock, not of an event.
+  validUntil         DateTime?
+  notes              String?
+
+  taxableTotal  Decimal @db.Decimal(14, 2)
+  discountTotal Decimal @default(0) @db.Decimal(14, 2)
+  cgstTotal     Decimal @default(0) @db.Decimal(14, 2)
+  sgstTotal     Decimal @default(0) @db.Decimal(14, 2)
+  igstTotal     Decimal @default(0) @db.Decimal(14, 2)
+  roundOff      Decimal @default(0) @db.Decimal(14, 2)
+  grandTotal    Decimal @db.Decimal(14, 2)
+
+  status          SalesDocStatus @default(OPEN)
+  cancelledReason String?
+
+  /// Set once the document becomes a real bill. Unique: one document cannot be billed
+  /// twice, and the invoice can be traced back to what was quoted.
+  convertedInvoiceId String?   @unique
+  convertedAt        DateTime?
+
+  createdById String?
+  lines       SalesDocLine[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([shopId, kind, fy, docNo])
+  @@index([shopId, kind, status])
+  @@index([shopId, date])
+  @@index([customerId])
+}
+
+model SalesDocLine {
+  id         String   @id @default(cuid())
+  shopId     String
+  salesDocId String
+  salesDoc   SalesDoc @relation(fields: [salesDocId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  saleUnitId String
+  hsnCode    String?
+  /// Mirrors InvoiceLine field-for-field so conversion is a straight copy and the
+  /// print template can render either without a second code path.
+  saleQty      Decimal @db.Decimal(14, 3)
+  baseQty      Decimal @db.Decimal(14, 3)
+  unitPrice    Decimal @db.Decimal(14, 2)
+  lineDiscount Decimal @default(0) @db.Decimal(14, 2)
+  taxableValue Decimal @db.Decimal(14, 2)
+  gstRate      Decimal @db.Decimal(5, 2)
+  cgst         Decimal @default(0) @db.Decimal(14, 2)
+  sgst         Decimal @default(0) @db.Decimal(14, 2)
+  igst         Decimal @default(0) @db.Decimal(14, 2)
+  /// Position on the printed document, so a reordered quote reprints in order.
+  sortOrder    Int     @default(0)
+
+  @@index([salesDocId])
+  @@index([shopId])
 }

@@ -27,6 +27,10 @@ const NAV: NavDef[] = [
     iconKey: "billing",
     visible: (s) => can(s, "bill.kacha.create") || can(s, "bill.pakka.create"),
   },
+  // Estimates / proforma / delivery challans (21). Its own entry rather than a child of
+  // Billing: a shopkeeper writing a quote has not started a sale, and burying it under
+  // the till is how myBillBook users lose it.
+  { href: "/sales", label: "Estimates", iconKey: "salesdoc", visible: (s) => can(s, "bill.read") },
   { href: "/ledger", label: "Ledger", iconKey: "ledger", visible: (s) => can(s, "ledger.read") },
   { href: "/orders", label: "Orders", iconKey: "orders", visible: (s) => can(s, "orders.read") },
   { href: "/reports", label: "Reports", iconKey: "reports", visible: (s) => can(s, "reports.read") },

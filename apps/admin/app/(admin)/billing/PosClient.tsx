@@ -10,6 +10,7 @@ import {
   type KachaActionState,
   type PakkaActionState,
 } from "./actions";
+import { markConvertedAction } from "../sales/actions";
 import { previewTotals, type PreviewLine } from "./preview";
 import { buildWhatsAppUrl } from "./share";
 import { InvoicePrint, KachaPrint, type StoreBranding, type LineLabelLookup } from "./print/Templates";
@@ -114,6 +115,28 @@ interface CartLine {
   lineDiscount: string;
 }
 
+/**
+ * A saved estimate / proforma / delivery challan handed to the counter for billing
+ * (21). The lines are seeded into the cart at the rates the document promised, and
+ * `salesDocId` is stamped as converted once the invoice actually exists.
+ */
+export interface PosPrefill {
+  salesDocId: string;
+  docNo: string;
+  kindLabel: string;
+  placeOfSupplyState: string;
+  customer: PosCustomer | null;
+  customerName: string | null;
+  lines: {
+    productId: string;
+    saleUnitId: string;
+    quantity: string;
+    /** Paise — the rate the document quoted, carried over as an explicit override. */
+    rateOverride: number;
+    lineDiscount: number;
+  }[];
+}
+
 type Mode = "KACHA" | "PAKKA";
 type PaymentMode = "CASH" | "UPI" | "CARD" | "KHATA";
 type PrintSize = "thermal2" | "thermal3" | "a5" | "a4";
@@ -124,6 +147,7 @@ let keySeq = 1;
 
 export function PosClient({
   products,
+  prefill,
   mayReadCustomers = false,
   homeState,
   storeName,
@@ -133,6 +157,8 @@ export function PosClient({
   mayPakka,
 }: {
   products: PosProduct[];
+  /** Set when the counter was opened from a saved estimate / proforma / challan (21). */
+  prefill?: PosPrefill;
   /** When true, the khata customer picker (typeahead → /api/customers?q=) is shown. */
   mayReadCustomers?: boolean;
   homeState: string;
@@ -175,15 +201,33 @@ export function PosClient({
 
   const [mode, setMode] = useState<Mode>(mayPakka ? "PAKKA" : "KACHA");
   const [search, setSearch] = useState("");
-  const [lines, setLines] = useState<CartLine[]>([]);
+  // Seeded from a saved document when the counter was opened from one. The quoted rate
+  // is carried as an explicit rateOverride, not left to the catalog: the customer was
+  // promised that number, and a catalog price change since then must not silently move it.
+  const [lines, setLines] = useState<CartLine[]>(
+    prefill
+      ? prefill.lines.map((l) => ({
+          key: keySeq++,
+          productId: l.productId,
+          saleUnitId: l.saleUnitId,
+          quantity: l.quantity,
+          rateOverride: (l.rateOverride / 100).toFixed(2),
+          lineDiscount: l.lineDiscount > 0 ? (l.lineDiscount / 100).toFixed(2) : "",
+        }))
+      : [],
+  );
   const [billDiscount, setBillDiscount] = useState("");
   const [roundOff, setRoundOff] = useState(true);
-  const [placeOfSupply, setPlaceOfSupply] = useState(homeState);
-  const [customerName, setCustomerName] = useState("");
+  const [placeOfSupply, setPlaceOfSupply] = useState(prefill?.placeOfSupplyState ?? homeState);
+  const [customerName, setCustomerName] = useState(
+    prefill && !prefill.customer ? (prefill.customerName ?? "") : "",
+  );
   const [customerGstin, setCustomerGstin] = useState("");
   /** Selected counter-customer (required for KHATA — the receivable posts here). null =
    *  walk-in. Resolved via the typeahead picker, not an eagerly-loaded directory. */
-  const [customer, setCustomer] = useState<PosCustomer | null>(null);
+  const [customer, setCustomer] = useState<PosCustomer | null>(prefill?.customer ?? null);
+  /** Cleared once the bill is raised, so a reset cart cannot re-stamp the document. */
+  const [pendingDocId, setPendingDocId] = useState<string | null>(prefill?.salesDocId ?? null);
   const customerId = customer?.id ?? "";
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("CASH");
   const [amountPaid, setAmountPaid] = useState("");
@@ -480,6 +524,23 @@ export function PosClient({
     }
   }
 
+  /**
+   * Stamp the source document as billed, AFTER the invoice exists. Deliberately not
+   * part of the invoice transaction: the sale is real either way, so a failure here is
+   * a warning to retry from the document, never a failed bill.
+   */
+  async function stampSourceDoc(invoiceId: string) {
+    const docId = pendingDocId;
+    if (!docId) return;
+    setPendingDocId(null);
+    const res = await markConvertedAction(docId, invoiceId);
+    if (res.error) {
+      toast.info("Bill created, but the estimate could not be marked as billed.", {
+        description: res.error,
+      });
+    }
+  }
+
   async function onFinalizePakka() {
     setBusy(true);
     setError(null);
@@ -490,6 +551,7 @@ export function PosClient({
     if (res.ok && res.invoice) {
       setInvoice(res.invoice);
       toast.success(t("pos.toastInvoiceCreated", { invoiceNo: res.invoice.invoiceNo }));
+      await stampSourceDoc(res.invoice.id);
       reset();
     } else {
       const msg = res.error ?? t("pos.errorCreateInvoice");
@@ -515,6 +577,7 @@ export function PosClient({
       toast.success(t("pos.toastInvoiceCreated", { invoiceNo: res.invoice.invoiceNo }), {
         description: t("pos.toastConvertedDesc"),
       });
+      await stampSourceDoc(res.invoice.id);
       reset();
     } else {
       const msg = res.error ?? t("pos.errorConvert");
@@ -544,6 +607,15 @@ export function PosClient({
     <div className="grid gap-6 pb-24 lg:grid-cols-[1fr_360px] lg:pb-0">
       {/* ── Cart column ── */}
       <section className="space-y-3">
+        {/* Billing from a saved document (21) — say which one, and that it is still just
+            a cart until the bill is raised. */}
+        {prefill && pendingDocId && (
+          <Alert>
+            Billing {prefill.kindLabel.toLowerCase()} <strong>{prefill.docNo}</strong>. Adjust
+            quantities or rates if they have changed — it is marked as billed only once you create
+            the invoice.
+          </Alert>
+        )}
         {/* Mode toggle */}
         <div className="flex flex-wrap items-center gap-3">
           <div

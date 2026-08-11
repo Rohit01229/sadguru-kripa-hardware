@@ -132,7 +132,8 @@ function money2(v: Decimal.Value): Prisma.Decimal {
   return new Prisma.Decimal(new Decimal(v).toFixed(2));
 }
 
-interface LoadedSaleUnit {
+/** Exported so the pre-sale documents (21) price their lines through the SAME loader. */
+export interface LoadedSaleUnit {
   saleUnitId: string;
   unitCode: string;
   unitKind: "MEASURED" | "PIECE";
@@ -152,7 +153,7 @@ interface LoadedSaleUnit {
  * product (guards against cross-product spoofing). Uses the caller's tx so the read
  * is consistent with the decrement in the same transaction.
  */
-async function loadLineCatalog(
+export async function loadLineCatalog(
   tx: Tx,
   shopId: string,
   productId: string,
@@ -183,7 +184,7 @@ async function loadLineCatalog(
 }
 
 /** Sale-unit qty → base-unit Prisma Decimal (rejects fractional PIECE via toBaseQty — 03 §4). */
-function toBase(quantity: string, su: LoadedSaleUnit): Prisma.Decimal {
+export function toBase(quantity: string, su: LoadedSaleUnit): Prisma.Decimal {
   const base = toBaseQty(quantity, {
     code: su.unitCode,
     kind: su.unitKind,

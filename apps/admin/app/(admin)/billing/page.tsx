@@ -1,18 +1,32 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { listProducts, getStoreConfig, getBillTheme, requirePermission, Forbidden, can } from "@hardware/core";
+import {
+  listProducts,
+  getProduct,
+  getStoreConfig,
+  getBillTheme,
+  getSalesDoc,
+  requirePermission,
+  Forbidden,
+  can,
+} from "@hardware/core";
 import { PageHeader, EmptyState, Button } from "@hardware/ui";
 import { getStaffSession, requireShopId } from "../../../lib/session";
 import { BillingNav, Forbid } from "./nav";
-import { PosClient, type PosProduct } from "./PosClient";
+import { PosClient, type PosProduct, type PosPrefill } from "./PosClient";
 
 // Counter POS (S4). Loads the active catalog (with sale units + GST rate + inclusive
 // flag, for live totals) and the StoreConfig (home state = place-of-supply default,
 // branding for print). Guarded on bill.kacha.create OR bill.pakka.create — the
 // counter is usable by anyone who can ring up either kind of sale; each finalize is
 // re-checked in core.
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  /** `?fromDoc=<id>` — billing an estimate / proforma / challan (21). */
+  searchParams: Promise<{ fromDoc?: string }>;
+}) {
   const session = await getStaffSession();
   if (!session) redirect("/login");
 
@@ -49,7 +63,7 @@ export default async function BillingPage() {
     getBillTheme(shopId),
   ]);
 
-  const products: PosProduct[] = productPage.data.map((p) => ({
+  const toPos = (p: (typeof productPage.data)[number]): PosProduct => ({
     id: p.id,
     name: p.name,
     sku: p.sku,
@@ -69,7 +83,51 @@ export default async function BillingPage() {
       mrp: su.mrp,
       isDefault: su.isDefault,
     })),
-  }));
+  });
+
+  const products: PosProduct[] = productPage.data.map(toPos);
+
+  // ── Billing an estimate / proforma / challan (21) ──
+  // The document's lines are loaded into the cart so the operator can adjust before
+  // finalising. Only an OPEN document prefills: a cancelled or already-billed one must
+  // not quietly become a second bill. Its items may sit outside the first catalog page,
+  // so any missing ones are fetched here — otherwise the cart would hold a line the
+  // client cannot price or name.
+  const { fromDoc } = await searchParams;
+  let prefill: PosPrefill | undefined;
+  if (fromDoc) {
+    const doc = await getSalesDoc(shopId, fromDoc);
+    if (doc && doc.status === "OPEN") {
+      const known = new Set(products.map((p) => p.id));
+      const missing = [...new Set(doc.lines.map((l) => l.productId))].filter((id) => !known.has(id));
+      for (const id of missing) {
+        const p = await getProduct(shopId, id);
+        if (p) products.push(toPos(p));
+      }
+      prefill = {
+        salesDocId: doc.id,
+        docNo: doc.docNo,
+        kindLabel: doc.kindLabel,
+        placeOfSupplyState: doc.placeOfSupplyState,
+        customer: doc.customerId
+          ? {
+              id: doc.customerId,
+              name: doc.customerName ?? "",
+              phone: doc.customerPhone,
+              gstin: doc.customerGstin,
+            }
+          : null,
+        customerName: doc.customerName,
+        lines: doc.lines.map((l) => ({
+          productId: l.productId,
+          saleUnitId: l.saleUnitId,
+          quantity: l.saleQty,
+          rateOverride: l.unitPrice,
+          lineDiscount: l.lineDiscount,
+        })),
+      };
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -95,6 +153,7 @@ export default async function BillingPage() {
         <PosClient
           billTheme={billTheme}
           products={products}
+          prefill={prefill}
           mayReadCustomers={mayReadCustomers}
           homeState={store?.homeState ?? "19"}
           storeName={store?.name ?? "My Hardware Store"}

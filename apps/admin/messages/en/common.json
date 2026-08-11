@@ -42,6 +42,7 @@
     "catalog": "Catalog",
     "stock": "Stock",
     "billing": "Billing",
+    "salesdoc": "Estimates",
     "ledger": "Ledger",
     "orders": "Orders",
     "reports": "Reports",
