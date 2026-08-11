@@ -11,7 +11,8 @@
 // only a customer can have a storefront login and a khata; only a supplier receives a
 // purchase order. So the SCREEN is unified and the models stay as they are.
 import Decimal from "decimal.js";
-import { Prisma, prisma } from "../shared/db";
+import { prisma } from "../shared/db";
+import type { Prisma } from "../shared/db";
 import { toPaise } from "../shared/money";
 import type { Id } from "../shared/types";
 import { listPartiesQuerySchema, type ListPartiesQuery, type PartyKind } from "./schema";

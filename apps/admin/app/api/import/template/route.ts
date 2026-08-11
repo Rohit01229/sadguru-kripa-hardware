@@ -18,7 +18,9 @@ export async function GET(): Promise<NextResponse> {
     if (!session) return unauthenticated(rid);
 
     // A leading BOM makes Excel honour UTF-8 (₹ and Hindi text) on a double-click open.
-    const body = `﻿${buildImportTemplateCsv()}`;
+    // Written as an escape, not a literal U+FEFF: the raw character is invisible in an
+    // editor, so anyone tidying this line would delete it without noticing.
+    const body = `\uFEFF${buildImportTemplateCsv()}`;
     return new NextResponse(body, {
       status: 200,
       headers: {

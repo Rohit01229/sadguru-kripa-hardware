@@ -167,7 +167,6 @@ function Header({
     <div className={align}>
       {/* Logo is a plain <img> so it survives print and the PDF pipeline alike. */}
       {rt.showLogo && store.logoKey ? (
-        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={store.logoKey}
           alt=""

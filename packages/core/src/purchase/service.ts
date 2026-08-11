@@ -40,7 +40,8 @@ import {
 // into the shop can certainly ask a supplier for a price. Reusing the stock keys keeps
 // this out of the RBAC seed and cannot widen anyone's access.
 const WRITE_PERMISSION = "stock.grn" as const;
-const READ_PERMISSION = "stock.read" as const;
+// Reads take a bare `shopId` rather than a session (the same shape listInvoices uses),
+// so "stock.read" is enforced by the pages that call them, not here.
 
 export interface PurchaseCtx {
   session: Session;

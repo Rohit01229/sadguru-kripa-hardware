@@ -7,7 +7,7 @@
 // data the portal asks for, produce the portal's own upload JSON, and record the number
 // and validity once issued. That is genuinely useful today and is the part that has to
 // exist regardless of whether we ever automate the call itself.
-import { Prisma, prisma, runTx } from "../shared/db";
+import { prisma, runTx, type Prisma } from "../shared/db";
 import { audit } from "../shared/audit";
 import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";

@@ -1,0 +1,162 @@
+name: CI
+
+# Runs on every push to main and every pull request. Until now every check in this
+# repo was run by hand, which meant nothing caught a break except somebody noticing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless — cancel it rather
+# than pay for both.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Prisma's datasource block reads these, and `prisma generate` (which runs from
+  # packages/db's postinstall) refuses to start without them. NOTHING in CI connects:
+  # lint, typecheck, test and build were all verified to pass against a URL that
+  # points nowhere. Do not put a real database here — CI must never be able to reach
+  # production data.
+  DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+  DIRECT_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `version:` — the action reads it from package.json's `packageManager`
+      # field, so the lockfile and CI can never drift onto different pnpm versions.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Turbo's cache makes reruns cheap; keyed on the lockfile so a dependency change
+      # invalidates it.
+      - name: Restore turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-${{ runner.os }}-
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      # The build is the check that catches what typecheck cannot — a bad import in a
+      # server component, a route that will not compile, a missing "use client".
+      - name: Build
+        run: pnpm build
+
+      - name: Prisma schema is valid
+        run: pnpm --filter @hardware/db exec prisma validate
+
+  migrations:
+    name: Migrations apply cleanly and match the schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # A THROWAWAY Postgres in the runner. This is the one context where pointing
+    # Prisma at a scratch database is safe: it is created empty for this job and
+    # destroyed with it, so the "never aim migrate/shadow commands at the real
+    # database" rule is not in play. Never give this job a production URL.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Proves the whole chain replays from nothing. A migration that only works
+      # because of the state already in someone's database fails here.
+      - name: Apply every migration to an empty database
+        run: pnpm --filter @hardware/db exec prisma migrate deploy
+
+      # Proves nobody edited schema.prisma without writing the migration for it —
+      # exactly the drift that makes a deploy fail at the worst moment. `--exit-code`
+      # returns non-zero when the database and the schema disagree.
+      - name: No drift between the schema and the applied migrations
+        run: |
+          pnpm --filter @hardware/db exec prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --exit-code
+      - name: Explain a drift failure
+        if: failure()
+        run: |
+          echo "::error::schema.prisma and the migrations disagree."
+          echo "Generate the missing migration with:"
+          echo "  prisma migrate diff --from-schema-datasource prisma/schema.prisma \\"
+          echo "    --to-schema-datamodel prisma/schema.prisma --script"
+          echo "Do NOT run 'prisma migrate dev' against the real database."
+
+  security:
+    name: Secrets and dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to scan commits, not just the working tree.
+          fetch-depth: 0
+
+      # Committed secrets are the failure that cannot be undone by a later commit —
+      # once pushed to a public repo they must be rotated. This one blocks the build.
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Advisories usually land in transitive dependencies we cannot fix the same day,
+      # so this REPORTS rather than blocks. A red X on every unrelated PR trains people
+      # to ignore CI, which costs more than it catches.
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
+        continue-on-error: true
+
+# Deliberately NOT here: `prisma migrate deploy` on main. Migrations against the real
+# database stay a human, deliberate act — this project has already lost its database
+# once to an automated Prisma command. See docs/architecture/17 and the runbook.

@@ -1,0 +1,36 @@
+version: 2
+
+updates:
+  # One weekly PR batch rather than a drip: a monorepo on Next + Prisma + Tailwind
+  # produces enough churn that daily updates get ignored, and ignored updates are the
+  # same as no updates.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps almost never need thought — one PR, one review.
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Majors for these move the whole app at once and need a planned migration, not
+      # a Monday morning PR. Prisma 7 and Next 16 in particular are known breaking
+      # upgrades this codebase is not ready for.
+      - dependency-name: prisma
+        update-types: [version-update:semver-major]
+      - dependency-name: "@prisma/client"
+        update-types: [version-update:semver-major]
+      - dependency-name: next
+        update-types: [version-update:semver-major]
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+
+  # The actions in ci.yml pin to major tags; this keeps them current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

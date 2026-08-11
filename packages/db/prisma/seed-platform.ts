@@ -6,10 +6,29 @@
 // the environment rather than hardcoding one.
 //
 //   PLATFORM_EMAIL=you@example.com PLATFORM_PASSWORD='…' pnpm db:seed:platform
+//
+// argon2id is reproduced inline from packages/auth/src/password.ts rather than imported,
+// for the same reason seed.ts does it: @hardware/auth depends on @hardware/db, so a
+// package edge back the other way is a workspace CYCLE — which turbo refuses to build,
+// taking every root `pnpm lint` / `typecheck` / `build` down with it. The parameters
+// MUST match password.ts or the seeded hash will not verify at login.
 import { PrismaClient } from "@prisma/client";
-import { hashPassword } from "@hardware/auth";
+import { argon2id } from "hash-wasm";
+import { randomBytes } from "node:crypto";
 
 const prisma = new PrismaClient();
+
+async function hashPassword(password: string): Promise<string> {
+  return argon2id({
+    password,
+    salt: randomBytes(16),
+    parallelism: 1,
+    iterations: 3,
+    memorySize: 65536,
+    hashLength: 32,
+    outputType: "encoded",
+  });
+}
 
 async function main() {
   const email = (process.env.PLATFORM_EMAIL ?? "admin@platform.local").toLowerCase();

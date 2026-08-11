@@ -208,8 +208,8 @@ export function SalesDocForm({
     return () => {
       cancelled = true;
     };
-    // Runs once for the loaded document.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Runs once for the loaded document: re-running on every `byId` change would
+    // refetch on each keystroke that merges a searched product into the catalog.
   }, [existing]);
 
   // ── Item search (local page first, then the server so ANY item is reachable) ──
@@ -334,7 +334,7 @@ export function SalesDocForm({
       roundOff,
       taxed: true,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `ratePaise` is intentionally excluded: it reads `byId`, which is already a dep.
   }, [lines, byId, placeOfSupply, homeState, billDiscount, roundOff]);
 
   const partyName = customer?.name ?? walkInName.trim();

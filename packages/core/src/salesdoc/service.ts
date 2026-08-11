@@ -47,7 +47,8 @@ import {
 // keeps this out of the RBAC seed entirely and cannot widen anyone's access, because
 // every holder already has the stronger right.
 const WRITE_PERMISSION = "bill.pakka.create" as const;
-const READ_PERMISSION = "bill.read" as const;
+// Reads take a bare `shopId` rather than a session (the same shape listInvoices uses),
+// so "bill.read" is enforced by the pages that call them, not here.
 
 export interface SalesDocCtx {
   session: Session;
