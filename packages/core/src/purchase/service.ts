@@ -21,6 +21,7 @@ import { audit } from "../shared/audit";
 import { requirePermission, requireShop, type Session } from "../shared/rbac";
 import { DomainError } from "../shared/errors";
 import { toPaise, fromPaise } from "../shared/money";
+import { toBaseQty } from "../shared/uom";
 import type { Id } from "../shared/types";
 import { financialYear } from "../billing/numbering";
 import {
@@ -89,6 +90,10 @@ export interface PurchaseOrderLineDTO {
   unitLabel: string;
   /** Quantity in the receive unit. */
   quantity: string;
+  /** How much has arrived, expressed back in the ORDERED unit. */
+  receivedQty: string;
+  /** Still expected, in the ordered unit. Never negative — an over-delivery reads 0. */
+  remainingQty: string;
   /** Paise. */
   costPerUnit: number;
   amount: number;
@@ -106,9 +111,11 @@ export interface PurchaseOrderDTO {
   lines: PurchaseOrderLineDTO[];
   /** Paise. */
   subtotal: number;
-  status: "OPEN" | "RECEIVED" | "CANCELLED";
+  status: "OPEN" | "PARTIAL" | "RECEIVED" | "CANCELLED";
   cancelledReason: string | null;
-  receivedGrnId: Id | null;
+  /** Every lot received against this order, newest first. */
+  receipts: { id: Id; date: string; refNo: string | null }[];
+  /** Set only when the LAST outstanding quantity arrives. */
   receivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -118,6 +125,10 @@ const poInclude = {
   lines: {
     orderBy: { sortOrder: "asc" },
     include: { product: { select: { name: true, sku: true } } },
+  },
+  receipts: {
+    orderBy: { date: "desc" },
+    select: { id: true, date: true, refNo: true },
   },
 } satisfies Prisma.PurchaseOrderInclude;
 
@@ -146,20 +157,37 @@ function toDTO(po: PurchaseOrderWith, unitLabels: Map<string, string>): Purchase
     date: po.date.toISOString(),
     expectedDate: po.expectedDate?.toISOString() ?? null,
     notes: po.notes,
-    lines: po.lines.map((l) => ({
-      productId: l.productId,
-      productName: l.product.name,
-      productSku: l.product.sku,
-      receiveUnitId: l.receiveUnitId,
-      unitLabel: unitLabels.get(l.receiveUnitId) ?? "",
-      quantity: l.quantity.toString(),
-      costPerUnit: toPaise(l.costPerUnit),
-      amount: toPaise(l.amount),
-    })),
+    lines: po.lines.map((l) => {
+      // Progress is tracked in base units (see the schema note) but a shopkeeper
+      // ordered bags, so convert back before showing it. The ratio ordered-qty ÷
+      // ordered-base IS the line's own conversion factor, snapshotted with it — no
+      // second lookup, and immune to a later edit of the unit.
+      const perBase = l.baseQty.isZero()
+        ? new Decimal(0)
+        : new Decimal(l.quantity.toString()).div(l.baseQty.toString());
+      const receivedQty = new Decimal(l.receivedBaseQty.toString()).times(perBase);
+      const remaining = Decimal.max(new Decimal(l.quantity.toString()).minus(receivedQty), 0);
+      return {
+        productId: l.productId,
+        productName: l.product.name,
+        productSku: l.product.sku,
+        receiveUnitId: l.receiveUnitId,
+        unitLabel: unitLabels.get(l.receiveUnitId) ?? "",
+        quantity: l.quantity.toString(),
+        receivedQty: receivedQty.toDecimalPlaces(3).toString(),
+        remainingQty: remaining.toDecimalPlaces(3).toString(),
+        costPerUnit: toPaise(l.costPerUnit),
+        amount: toPaise(l.amount),
+      };
+    }),
     subtotal: toPaise(po.subtotal),
     status: po.status,
     cancelledReason: po.cancelledReason,
-    receivedGrnId: po.receivedGrnId,
+    receipts: po.receipts.map((r) => ({
+      id: r.id,
+      date: r.date.toISOString(),
+      refNo: r.refNo,
+    })),
     receivedAt: po.receivedAt?.toISOString() ?? null,
     createdAt: po.createdAt.toISOString(),
     updatedAt: po.updatedAt.toISOString(),
@@ -186,7 +214,7 @@ async function priceLines(
     const line = lines[i]!;
     const su = await tx.productSaleUnit.findFirst({
       where: { id: line.receiveUnitId, productId: line.productId, shopId },
-      select: { id: true },
+      select: { id: true, factorToBase: true, unit: { select: { code: true, kind: true } } },
     });
     if (!su) {
       throw new DomainError(
@@ -194,6 +222,17 @@ async function priceLines(
         "NOT_FOUND",
       );
     }
+
+    // Snapshot the base-unit quantity at order time. Receipts are matched against this
+    // (they arrive in base units), and freezing it means a later edit of the unit's
+    // conversion factor cannot retroactively change how much was once ordered.
+    // toBaseQty also rejects a fractional quantity of a PIECE unit — 7.5 taps is not
+    // an order anyone can fulfil.
+    const baseQty = toBaseQty(line.quantity, {
+      code: su.unit.code,
+      kind: su.unit.kind,
+      factorToBase: su.factorToBase.toString(),
+    });
 
     const cost = fromPaise(line.costPerUnit);
     const amount = cost.times(line.quantity).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
@@ -204,6 +243,7 @@ async function priceLines(
       productId: line.productId,
       receiveUnitId: line.receiveUnitId,
       quantity: qty3(line.quantity),
+      baseQty: qty3(baseQty),
       costPerUnit: money2(cost),
       amount: money2(amount),
       sortOrder: i,
@@ -288,13 +328,14 @@ export async function updatePurchaseOrder(
       select: { id: true, status: true, subtotal: true },
     });
     if (!existing) throw new DomainError("That order was not found.", "NOT_FOUND");
-    // A received order is the record of what was ordered before the goods arrived.
-    // Editing it would rewrite history the goods receipt already relies on.
+    // Once ANY goods have arrived the order is the record they were checked against —
+    // editing it would rewrite history the receipt already relies on. That includes a
+    // partly-filled order: its remaining quantities are derived from these lines.
     if (existing.status !== "OPEN") {
       throw new DomainError(
-        existing.status === "RECEIVED"
-          ? "Goods have already been received against this order, so it can no longer be changed."
-          : "This order is cancelled and can no longer be changed.",
+        existing.status === "CANCELLED"
+          ? "This order is cancelled and can no longer be changed."
+          : "Goods have already been received against this order, so it can no longer be changed.",
         "PO_NOT_EDITABLE",
       );
     }
@@ -359,6 +400,9 @@ export async function cancelPurchaseOrder(
         "PO_ALREADY_RECEIVED",
       );
     }
+    // A PARTIAL order CAN be cancelled — "the supplier cannot send the rest" is exactly
+    // why cancelling exists. What already arrived stays received; only the outstanding
+    // balance is written off.
 
     const updated = await tx.purchaseOrder.update({
       where: { id: existing.id },
@@ -382,44 +426,198 @@ export async function cancelPurchaseOrder(
   return toDTO(po, await unitLabelsFor(po.lines.map((l) => l.receiveUnitId)));
 }
 
+/** One ordered line, reduced to what allocation actually needs. All base units. */
+export interface AllocatableLine {
+  id: string;
+  productId: string;
+  /** How much was ordered. */
+  baseQty: Decimal.Value;
+  /** How much has already arrived on earlier deliveries. */
+  receivedBaseQty: Decimal.Value;
+}
+
 /**
- * Stamp an order as received, AFTER the goods receipt exists. Called by the GRN path,
- * never instead of it — the stock is booked in either way, so a failure here is a
- * warning to retry, not a lost receipt.
+ * Spread one delivery across the lines it was ordered on. PURE — no DB, fully testable.
  *
- * The `status: "OPEN"` guard inside the updateMany is what makes double-receiving
- * impossible: two people racing the same order each record their own GRN, but only one
- * update matches and the second is told so rather than silently overwriting the link.
+ * Rules, and why:
+ *  - Matching is by PRODUCT in base units, ignoring the unit each side used. An order
+ *    for 20 bags of cement is satisfied by a receipt of 1000 kg; any other rule leaves
+ *    the order open forever.
+ *  - A line is filled only up to what is still outstanding, and the surplus flows to
+ *    the next line of the same product — the way a storeman ticks off a delivery note.
+ *  - Over-delivery is NOT credited beyond the order. The stock movement already
+ *    recorded the true quantity; inflating the order's "received" past what was asked
+ *    for would make every outstanding figure wrong.
+ *  - A product that was never ordered credits nothing. A supplier sending an extra
+ *    item is not an error to reject — the stock is right either way.
+ *
+ * Returns only the lines whose figure CHANGED, so the caller writes the minimum.
  */
-export async function markPurchaseOrderReceived(
+export function allocateReceipt(
+  lines: AllocatableLine[],
+  arrivedByProduct: Map<string, Decimal.Value>,
+): { updates: { id: string; receivedBaseQty: Decimal }[]; complete: boolean } {
+  const pool = new Map<string, Decimal>();
+  for (const [productId, qty] of arrivedByProduct) pool.set(productId, new Decimal(qty));
+
+  const updates: { id: string; receivedBaseQty: Decimal }[] = [];
+  const finalQty = new Map<string, Decimal>();
+
+  for (const line of lines) {
+    const already = new Decimal(line.receivedBaseQty);
+    finalQty.set(line.id, already);
+
+    const available = pool.get(line.productId);
+    if (!available || available.lte(0)) continue;
+
+    const outstanding = new Decimal(line.baseQty).minus(already);
+    if (outstanding.lte(0)) continue;
+
+    const credit = Decimal.min(available, outstanding);
+    pool.set(line.productId, available.minus(credit));
+    const next = already.plus(credit);
+    finalQty.set(line.id, next);
+    updates.push({ id: line.id, receivedBaseQty: next });
+  }
+
+  const complete = lines.every((l) =>
+    (finalQty.get(l.id) ?? new Decimal(l.receivedBaseQty)).gte(new Decimal(l.baseQty)),
+  );
+
+  return { updates, complete };
+}
+
+/** Outcome of crediting one receipt against an order, for the caller to report. */
+export interface ReceiptApplied {
+  status: "PARTIAL" | "RECEIVED";
+  /** True when nothing is outstanding any more. */
+  complete: boolean;
+  /** Lines still expecting goods, in the ORDERED unit — what to tell the operator. */
+  outstanding: { productName: string; remainingQty: string; unitLabel: string }[];
+}
+
+/**
+ * Credit a goods receipt against the order it was received for, AFTER the receipt
+ * exists. Called by the GRN path, never instead of it — the stock is booked in either
+ * way, so a failure here is a warning to retry, not a lost receipt.
+ *
+ * Goods arrive in lots, so this is additive rather than a one-shot stamp. The receipt's
+ * OWN lines are read back from the database rather than trusting anything the caller
+ * passes: what was actually booked into stock is the only honest measure of what
+ * arrived.
+ *
+ * Matching is by product, in BASE units. That deliberately ignores the unit each side
+ * used — an order for 20 bags of cement is satisfied by a receipt of 1000 kg, and any
+ * other rule would leave the order open forever. A receipt line for something that was
+ * never ordered simply credits nothing; the stock is still correct, and a supplier
+ * sending an extra item is not an error to reject.
+ *
+ * Double-crediting is impossible because `GoodsReceipt.purchaseOrderId` is set here and
+ * checked first: a receipt already attached to an order is refused.
+ */
+export async function applyReceiptToPurchaseOrder(
   purchaseOrderId: Id,
   grnId: Id,
   ctx: PurchaseCtx,
-): Promise<void> {
+): Promise<ReceiptApplied> {
   requirePermission(ctx.session, WRITE_PERMISSION);
   const shopId = requireShop(ctx.session);
 
-  await runTx(async (tx) => {
-    const result = await tx.purchaseOrder.updateMany({
-      where: { id: purchaseOrderId, shopId, status: "OPEN" },
-      data: { status: "RECEIVED", receivedGrnId: grnId, receivedAt: new Date() },
+  return await runTx(async (tx) => {
+    const po = await tx.purchaseOrder.findFirst({
+      where: { id: purchaseOrderId, shopId },
+      include: { lines: { orderBy: { sortOrder: "asc" } } },
     });
-    if (result.count === 0) {
+    if (!po) throw new DomainError("That order was not found.", "NOT_FOUND");
+    if (po.status === "CANCELLED") {
       throw new DomainError(
-        "That order is no longer open — goods may already have been received against it.",
-        "PO_NOT_OPEN",
+        "That order was cancelled, so goods cannot be received against it.",
+        "PO_CANCELLED",
       );
     }
+
+    const grn = await tx.goodsReceipt.findFirst({
+      where: { id: grnId, shopId },
+      select: { id: true, purchaseOrderId: true, lines: { select: { productId: true, baseQty: true } } },
+    });
+    if (!grn) throw new DomainError("That goods receipt was not found.", "NOT_FOUND");
+    if (grn.purchaseOrderId) {
+      throw new DomainError(
+        "That receipt has already been counted against an order.",
+        "GRN_ALREADY_APPLIED",
+      );
+    }
+
+    // Total what arrived, per product — a receipt may list the same item twice.
+    const arrived = new Map<string, Decimal>();
+    for (const l of grn.lines) {
+      const prev = arrived.get(l.productId) ?? new Decimal(0);
+      arrived.set(l.productId, prev.plus(l.baseQty.toString()));
+    }
+
+    // Spread the delivery across the lines (pure, unit-tested above). Completeness is
+    // judged on the lines as they will stand AFTER this receipt — the order may already
+    // have been partly filled by an earlier one.
+    const { updates, complete } = allocateReceipt(
+      po.lines.map((l) => ({
+        id: l.id,
+        productId: l.productId,
+        baseQty: l.baseQty.toString(),
+        receivedBaseQty: l.receivedBaseQty.toString(),
+      })),
+      arrived,
+    );
+
+    for (const u of updates) {
+      await tx.purchaseOrderLine.update({
+        where: { id: u.id },
+        data: { receivedBaseQty: qty3(u.receivedBaseQty) },
+      });
+    }
+
+    const after = await tx.purchaseOrderLine.findMany({
+      where: { purchaseOrderId: po.id },
+      orderBy: { sortOrder: "asc" },
+      include: { product: { select: { name: true } } },
+    });
+    const status = complete ? "RECEIVED" : "PARTIAL";
+
+    await tx.purchaseOrder.update({
+      where: { id: po.id },
+      data: { status, receivedAt: complete ? new Date() : null },
+    });
+    await tx.goodsReceipt.update({ where: { id: grn.id }, data: { purchaseOrderId: po.id } });
+
     await audit(tx, {
       shopId,
       ...auditMeta(ctx.session),
       permissionUsed: WRITE_PERMISSION,
-      action: "purchaseorder.receive",
+      action: complete ? "purchaseorder.receive" : "purchaseorder.receive.partial",
       targetType: "PurchaseOrder",
-      targetId: purchaseOrderId,
-      after: { grnId },
+      targetId: po.id,
+      after: { grnId, status, linesCredited: updates.length },
       requestId: ctx.requestId,
     });
+
+    const outstanding = after
+      .map((l) => {
+        const ordered = new Decimal(l.quantity.toString());
+        const perBase = l.baseQty.isZero()
+          ? new Decimal(0)
+          : ordered.div(l.baseQty.toString());
+        const remaining = Decimal.max(
+          ordered.minus(new Decimal(l.receivedBaseQty.toString()).times(perBase)),
+          0,
+        );
+        return {
+          productName: l.product.name,
+          remainingQty: remaining.toDecimalPlaces(3).toString(),
+          unitLabel: "",
+        };
+      })
+      .filter((l) => Number(l.remainingQty) > 0);
+
+    return { status, complete, outstanding };
   });
 }
 
@@ -539,14 +737,19 @@ export async function listPurchaseCatalog(shopId: string): Promise<PurchaseCatal
 /** Counts for the list-screen filter chips, in one grouped query. */
 export async function purchaseOrderCounts(
   shopId: string,
-): Promise<{ open: number; received: number; cancelled: number }> {
+): Promise<{ open: number; partial: number; received: number; cancelled: number }> {
   const rows = await prisma.purchaseOrder.groupBy({
     by: ["status"],
     where: { shopId },
     _count: { _all: true },
   });
   const get = (s: string) => rows.find((r) => r.status === s)?._count._all ?? 0;
-  return { open: get("OPEN"), received: get("RECEIVED"), cancelled: get("CANCELLED") };
+  return {
+    open: get("OPEN"),
+    partial: get("PARTIAL"),
+    received: get("RECEIVED"),
+    cancelled: get("CANCELLED"),
+  };
 }
 
 export {

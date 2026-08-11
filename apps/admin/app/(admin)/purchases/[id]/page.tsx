@@ -44,6 +44,9 @@ export default async function PurchaseOrderDetailPage({
   if (!order) notFound();
 
   const mayWrite = can(session, "stock.grn");
+  const pending = order.lines.filter((l) => Number(l.remainingQty) > 0);
+  /** Progress columns only earn their space once something has actually arrived. */
+  const anyReceived = order.lines.some((l) => Number(l.receivedQty) > 0);
 
   return (
     <div className="space-y-6">
@@ -65,15 +68,28 @@ export default async function PurchaseOrderDetailPage({
 
       {order.status === "RECEIVED" && (
         <Alert className="print:hidden">
-          Goods received on {order.receivedAt ? formatDate(order.receivedAt) : "—"} —{" "}
+          Fully received on {order.receivedAt ? formatDate(order.receivedAt) : "—"} across{" "}
+          {order.receipts.length} receipt{order.receipts.length === 1 ? "" : "s"} —{" "}
           <Link href="/stock/movements" className="font-medium underline">
             see the stock movements
           </Link>
         </Alert>
       )}
+      {order.status === "PARTIAL" && (
+        <Alert className="print:hidden">
+          Part received — <strong>{pending.length} item{pending.length === 1 ? "" : "s"}</strong>{" "}
+          still to come:{" "}
+          {pending
+            .map((l) => `${l.remainingQty} ${l.unitLabel} ${l.productName}`.trim())
+            .join(", ")}
+        </Alert>
+      )}
       {order.status === "CANCELLED" && (
         <Alert variant="destructive" className="print:hidden">
           Cancelled{order.cancelledReason ? ` — ${order.cancelledReason}` : ""}
+          {order.receipts.length > 0
+            ? ` · ${order.receipts.length} receipt${order.receipts.length === 1 ? "" : "s"} already booked in; only the balance was written off.`
+            : ""}
         </Alert>
       )}
 
@@ -125,26 +141,45 @@ export default async function PurchaseOrderDetailPage({
                   <tr className="border-b text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="py-2 text-left font-medium">#</th>
                     <th className="py-2 text-left font-medium">Item</th>
-                    <th className="py-2 text-right font-medium">Qty</th>
+                    <th className="py-2 text-right font-medium">Ordered</th>
+                    {anyReceived && <th className="py-2 text-right font-medium">Received</th>}
+                    {anyReceived && <th className="py-2 text-right font-medium">Pending</th>}
                     <th className="py-2 text-right font-medium">Rate</th>
                     <th className="py-2 text-right font-medium">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {order.lines.map((l, i) => (
-                    <tr key={`${l.productId}-${i}`} className="border-b last:border-0">
-                      <td className="py-2 text-muted-foreground">{i + 1}</td>
-                      <td className="py-2">
-                        <div>{l.productName}</div>
-                        <div className="text-xs text-muted-foreground">{l.productSku}</div>
-                      </td>
-                      <td className="py-2 text-right tabular-nums">
-                        {l.quantity} {l.unitLabel}
-                      </td>
-                      <td className="py-2 text-right tabular-nums">{formatMoney(l.costPerUnit)}</td>
-                      <td className="py-2 text-right tabular-nums">{formatMoney(l.amount)}</td>
-                    </tr>
-                  ))}
+                  {order.lines.map((l, i) => {
+                    const outstanding = Number(l.remainingQty) > 0;
+                    return (
+                      <tr key={`${l.productId}-${i}`} className="border-b last:border-0">
+                        <td className="py-2 text-muted-foreground">{i + 1}</td>
+                        <td className="py-2">
+                          <div>{l.productName}</div>
+                          <div className="text-xs text-muted-foreground">{l.productSku}</div>
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {l.quantity} {l.unitLabel}
+                        </td>
+                        {anyReceived && (
+                          <td className="py-2 text-right tabular-nums">{l.receivedQty}</td>
+                        )}
+                        {anyReceived && (
+                          <td
+                            className={`py-2 text-right tabular-nums ${
+                              outstanding ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground"
+                            }`}
+                          >
+                            {outstanding ? l.remainingQty : "—"}
+                          </td>
+                        )}
+                        <td className="py-2 text-right tabular-nums">
+                          {formatMoney(l.costPerUnit)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">{formatMoney(l.amount)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -175,10 +210,31 @@ export default async function PurchaseOrderDetailPage({
           <Card>
             <CardContent className="space-y-1.5 pt-6 text-sm">
               <Row k="Items" v={String(order.lines.length)} />
+              {anyReceived && <Row k="Still pending" v={String(pending.length)} />}
               <Row k="Value" v={formatMoney(order.subtotal)} />
               {order.expectedDate && <Row k="Expected" v={formatDate(order.expectedDate)} />}
             </CardContent>
           </Card>
+
+          {order.receipts.length > 0 && (
+            <Card>
+              <CardContent className="pt-6">
+                <h2 className="mb-2 text-sm font-semibold">
+                  Deliveries ({order.receipts.length})
+                </h2>
+                <ul className="space-y-1.5 text-sm">
+                  {order.receipts.map((r) => (
+                    <li key={r.id} className="flex items-baseline justify-between gap-2">
+                      <span>{formatDate(r.date)}</span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {r.refNo ?? "no bill no."}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
         </aside>
       </div>
     </div>

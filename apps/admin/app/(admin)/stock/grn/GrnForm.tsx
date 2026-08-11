@@ -16,7 +16,7 @@ import {
   toast,
 } from "@hardware/ui";
 import { recordGrnAction, type ActionState } from "../actions";
-import { markReceivedAction } from "../../purchases/actions";
+import { applyReceiptAction } from "../../purchases/actions";
 
 interface ProductOpt {
   id: string;
@@ -44,6 +44,8 @@ export interface GrnPrefill {
   purchaseOrderId: string;
   poNo: string;
   supplierId: string;
+  /** True when part of this order has already arrived — the lines below are the balance. */
+  isPartial: boolean;
   lines: { productId: string; receiveUnitId: string; quantity: string; costPerUnit: number }[];
 }
 
@@ -99,19 +101,25 @@ export function GrnForm({
     const result = await recordGrnAction(prev, fd);
     if (result.ok) {
       toast.success(t("grn.toastSuccess"));
-      // Stamp the source order AFTER the receipt exists. Stock is booked in either way,
-      // so a failure here is a warning to retry from the order — never lost stock.
-      if (pendingPoId && result.id) {
-        const poId = pendingPoId;
+      // Credit the source order AFTER the receipt exists. Stock is booked in either
+      // way, so a failure here is a warning to retry from the order — never lost stock.
+      const poId = pendingPoId;
+      if (poId && result.id) {
         setPendingPoId(null);
-        const stamp = await markReceivedAction(poId, result.id);
-        if (stamp.error) {
-          toast.info("Stock received, but the order could not be marked as received.", {
-            description: stamp.error,
+        const applied = await applyReceiptAction(poId, result.id);
+        if (applied.error) {
+          toast.info("Stock received, but the order could not be updated.", {
+            description: applied.error,
           });
+        } else if (applied.applied && !applied.applied.complete) {
+          // Say what is still owed rather than letting the operator assume it is closed.
+          const still = applied.applied.outstanding
+            .map((o) => `${o.remainingQty} × ${o.productName}`)
+            .join(", ");
+          toast.info("Part of the order is still to come.", { description: still });
         }
       }
-      router.push(pendingPoId ? "/purchases" : "/stock");
+      router.push(poId ? `/purchases/${poId}` : "/stock");
     } else if (result.error) {
       toast.error(result.error);
     }
@@ -160,8 +168,9 @@ export function GrnForm({
 
       {prefill && pendingPoId && (
         <Alert>
-          Receiving purchase order <strong>{prefill.poNo}</strong>. Correct the quantities and rates
-          if what arrived is different — the order is marked received once you save.
+          Receiving purchase order <strong>{prefill.poNo}</strong>
+          {prefill.isPartial ? " — the balance still outstanding" : ""}. Reduce a quantity if less
+          arrived; whatever is left stays on the order for the next delivery.
         </Alert>
       )}
 

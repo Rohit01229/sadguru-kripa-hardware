@@ -588,6 +588,9 @@ model Supplier {
 // purchase order actually says.
 enum PurchaseOrderStatus {
   OPEN
+  /// Some of what was ordered has arrived; the rest is still expected. Derived from
+  /// the lines on every receipt, never set by hand.
+  PARTIAL
   RECEIVED
   CANCELLED
 }
@@ -623,13 +626,16 @@ model PurchaseOrder {
   status          PurchaseOrderStatus @default(OPEN)
   cancelledReason String?
 
-  /// Set once goods are received against this order. Unique: one order cannot be
-  /// received twice, and the receipt is traceable back to what was ordered.
-  receivedGrnId String?   @unique
-  receivedAt    DateTime?
+  /// Set only when the LAST outstanding quantity arrives. Null while an order is
+  /// partially received — "when did it finish" has no answer until it has.
+  receivedAt DateTime?
 
   createdById String?
   lines       PurchaseOrderLine[]
+  /// Goods can arrive in more than one lot, so an order has MANY receipts. This is
+  /// what replaced the single `receivedGrnId`: cement turning up on two trucks is the
+  /// normal case, not an edge one.
+  receipts    GoodsReceipt[]
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
 
@@ -652,6 +658,15 @@ model PurchaseOrderLine {
   receiveUnitId String
   /// Quantity in the receive unit (not base units).
   quantity      Decimal @db.Decimal(14, 3)
+  /// The same quantity in BASE units, snapshotted at order time. Receipts are matched
+  /// against this rather than re-converting: goods are often ordered in bags and
+  /// received by weight, and editing a unit's conversion factor later must not
+  /// retroactively change how much was once ordered.
+  baseQty       Decimal @db.Decimal(14, 3)
+  /// How much has actually arrived, in BASE units. Accumulates across receipts. May
+  /// exceed baseQty — a supplier who sends 105 of an ordered 100 gets recorded
+  /// honestly rather than silently trimmed.
+  receivedBaseQty Decimal @default(0) @db.Decimal(14, 3)
   /// Expected landed cost per receive unit, in rupees.
   costPerUnit   Decimal @db.Decimal(14, 2)
   /// quantity × costPerUnit, stored so the list does not re-multiply on every read.
@@ -674,7 +689,13 @@ model GoodsReceipt {
   lines       GrnLine[]
   createdById String?
 
+  /// The order this lot was received against, when there was one (21c). Set once, and
+  /// its presence is what stops the same receipt being credited to an order twice.
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+
   @@index([shopId])
+  @@index([purchaseOrderId])
 }
 
 model GrnLine {

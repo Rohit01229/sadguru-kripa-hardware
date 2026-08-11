@@ -49,7 +49,10 @@ export default async function PurchaseOrdersPage({
   const shopId = await requireShopId();
   const sp = await searchParams;
   const status =
-    sp.status === "OPEN" || sp.status === "RECEIVED" || sp.status === "CANCELLED"
+    sp.status === "OPEN" ||
+    sp.status === "PARTIAL" ||
+    sp.status === "RECEIVED" ||
+    sp.status === "CANCELLED"
       ? sp.status
       : undefined;
 
@@ -60,8 +63,19 @@ export default async function PurchaseOrdersPage({
   const mayWrite = can(session, "stock.grn");
 
   const filters = [
-    { key: "", label: "All", count: counts.open + counts.received + counts.cancelled, href: "/purchases" },
+    {
+      key: "",
+      label: "All",
+      count: counts.open + counts.partial + counts.received + counts.cancelled,
+      href: "/purchases",
+    },
     { key: "OPEN", label: "Open", count: counts.open, href: "/purchases?status=OPEN" },
+    {
+      key: "PARTIAL",
+      label: "Part received",
+      count: counts.partial,
+      href: "/purchases?status=PARTIAL",
+    },
     { key: "RECEIVED", label: "Received", count: counts.received, href: "/purchases?status=RECEIVED" },
     {
       key: "CANCELLED",

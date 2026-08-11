@@ -6,8 +6,9 @@ import {
   createPurchaseOrder,
   updatePurchaseOrder,
   cancelPurchaseOrder,
-  markPurchaseOrderReceived,
+  applyReceiptToPurchaseOrder,
   type PurchaseOrderDTO,
+  type ReceiptApplied,
   DomainError,
   Forbidden,
 } from "@hardware/core";
@@ -81,19 +82,22 @@ export async function cancelPurchaseOrderAction(
 }
 
 /**
- * Stamp an order as received once its goods receipt exists. Called from the GRN form
- * AFTER the receipt has been recorded, so a failure here never means lost stock — the
- * caller surfaces it as a warning and the order can be retried from its own page.
+ * Credit a goods receipt against its order, once the receipt exists. Called from the
+ * GRN form AFTER the stock has been booked, so a failure here never means lost stock —
+ * the caller surfaces it as a warning and it can be retried from the order.
+ *
+ * Returns whether the order is now complete, so the form can say "3 bags still to
+ * come" rather than implying the order is closed.
  */
-export async function markReceivedAction(
+export async function applyReceiptAction(
   purchaseOrderId: string,
   grnId: string,
-): Promise<PurchaseOrderActionState> {
+): Promise<PurchaseOrderActionState & { applied?: ReceiptApplied }> {
   try {
-    await markPurchaseOrderReceived(purchaseOrderId, grnId, await ctx());
+    const applied = await applyReceiptToPurchaseOrder(purchaseOrderId, grnId, await ctx());
     revalidatePath("/purchases");
     revalidatePath(`/purchases/${purchaseOrderId}`);
-    return { ok: true };
+    return { ok: true, applied };
   } catch (e) {
     return { error: toError(e) };
   }

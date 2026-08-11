@@ -5,10 +5,12 @@ import { Badge } from "@hardware/ui";
 
 /**
  * Status pill for a purchase order. Deliberately says "Received" rather than "Closed":
- * what a shopkeeper wants to know is whether the goods turned up.
+ * what a shopkeeper wants to know is whether the goods turned up. "Part received" is
+ * its own state because a half-delivered order still needs chasing.
  */
 export function PurchaseOrderStatusBadge({ status }: { status: string }) {
   if (status === "RECEIVED") return <Badge variant="success">Received</Badge>;
+  if (status === "PARTIAL") return <Badge variant="warning">Part received</Badge>;
   if (status === "CANCELLED") return <Badge variant="destructive">Cancelled</Badge>;
   return <Badge variant="outline">Open</Badge>;
 }

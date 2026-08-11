@@ -57,7 +57,7 @@ export const cancelPurchaseOrderSchema = z.object({
 export type CancelPurchaseOrderInput = z.infer<typeof cancelPurchaseOrderSchema>;
 
 export const listPurchaseOrdersQuerySchema = z.object({
-  status: z.enum(["OPEN", "RECEIVED", "CANCELLED"]).optional(),
+  status: z.enum(["OPEN", "PARTIAL", "RECEIVED", "CANCELLED"]).optional(),
   supplierId: z.string().min(1).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),

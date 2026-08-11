@@ -48,16 +48,23 @@ export function PurchaseOrderActions({
     });
   }
 
+  // A part-received order can still take goods and can still be cancelled ("the
+  // supplier cannot send the rest"), but it can no longer be edited — its remaining
+  // quantities are derived from the lines the first delivery was checked against.
   const open = order.status === "OPEN";
+  const canReceive = open || order.status === "PARTIAL";
+  const canCancel = canReceive;
 
   return (
     <Card>
       <CardContent className="space-y-2 pt-6">
         {error && <Alert variant="destructive">{error}</Alert>}
 
-        {open && mayWrite && (
+        {canReceive && mayWrite && (
           <Button asChild className="w-full">
-            <Link href={`/stock/grn?fromPo=${order.id}`}>Receive goods</Link>
+            <Link href={`/stock/grn?fromPo=${order.id}`}>
+              {order.status === "PARTIAL" ? "Receive the rest" : "Receive goods"}
+            </Link>
           </Button>
         )}
 
@@ -73,13 +80,13 @@ export function PurchaseOrderActions({
           </Button>
         )}
 
-        {open && mayWrite && !confirming && (
+        {canCancel && mayWrite && !confirming && (
           <Button
             variant="ghost"
             className="w-full text-destructive"
             onClick={() => setConfirming(true)}
           >
-            Cancel this order
+            {order.status === "PARTIAL" ? "Write off the balance" : "Cancel this order"}
           </Button>
         )}
 

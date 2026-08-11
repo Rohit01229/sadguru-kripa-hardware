@@ -43,24 +43,32 @@ export default async function GrnPage({
     saleUnits: p.saleUnits.map((su) => ({ id: su.id, label: `${su.unitName} (×${su.factorToBase} ${p.baseUnit.code})` })),
   }));
 
-  // Receiving against a purchase order (21c). Only an OPEN order prefills: a cancelled
-  // or already-received one must not quietly book a second lot of stock.
+  // Receiving against a purchase order (21c). An order that is OPEN or PARTIAL can
+  // still take goods; a cancelled or fully-received one must not quietly book more.
+  //
+  // The lines are seeded with what is OUTSTANDING, not what was originally ordered —
+  // on the second lot of a part-delivered order, offering the full quantity again is
+  // how stock gets double-counted.
   const { fromPo } = await searchParams;
   let prefill: GrnPrefill | undefined;
   if (fromPo) {
     const po = await getPurchaseOrder(shopId, fromPo);
-    if (po && po.status === "OPEN") {
-      prefill = {
-        purchaseOrderId: po.id,
-        poNo: po.poNo,
-        supplierId: po.supplierId,
-        lines: po.lines.map((l) => ({
-          productId: l.productId,
-          receiveUnitId: l.receiveUnitId,
-          quantity: l.quantity,
-          costPerUnit: l.costPerUnit,
-        })),
-      };
+    if (po && (po.status === "OPEN" || po.status === "PARTIAL")) {
+      const outstanding = po.lines.filter((l) => Number(l.remainingQty) > 0);
+      if (outstanding.length > 0) {
+        prefill = {
+          purchaseOrderId: po.id,
+          poNo: po.poNo,
+          supplierId: po.supplierId,
+          isPartial: po.status === "PARTIAL",
+          lines: outstanding.map((l) => ({
+            productId: l.productId,
+            receiveUnitId: l.receiveUnitId,
+            quantity: l.remainingQty,
+            costPerUnit: l.costPerUnit,
+          })),
+        };
+      }
     }
   }
 
