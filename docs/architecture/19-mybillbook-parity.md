@@ -23,6 +23,7 @@ The nine parity items, in the order the user listed them:
 | 9 | e-invoice (IRN/QR) + e-way bill | ◑ **e-way bill DONE**; e-invoicing scoped &amp; deferred (not legally required below ₹5cr) — see [20](20-einvoice-eway-scope.md) |
 | + | **One-tap WhatsApp share** (doc 18's #1 gap) | ✅ Done |
 | + | **Estimate / Proforma / Delivery challan** + convert-to-bill | ✅ Done — see [21](21-presale-documents.md) |
+| + | **Expenses** (categories, GST split, month breakdown) | ✅ Done — see [21b](21b-expenses.md) |
 
 ---
 

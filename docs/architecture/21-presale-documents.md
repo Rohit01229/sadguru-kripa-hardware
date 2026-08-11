@@ -104,5 +104,5 @@ Against the live database, with every test row removed afterwards:
 ## 8. Open decisions
 
 - **Should a delivery challan reduce stock?** (§3) — the real remaining gap. Needs the attribute-on-convert path so conversion cannot double-deduct.
-- **Expenses, Purchase Order, and a unified Parties screen** are the next myBillBook menu entries we do not have.
+- **Purchase Order and a unified Parties screen** are the next myBillBook menu entries we do not have. (**Expenses** shipped — see [21b](21b-expenses.md), which also added the back-dateable document date these documents were missing.)
 - **Partial conversion** — billing half a quotation and leaving the rest open. myBillBook does not do this either; a shop splits the quote instead.

@@ -24,6 +24,7 @@ export * from "./orders/service"; // re-exports ./orders/schema + ./orders/razor
 export * from "./reports/service"; // re-exports ./reports/schema + ./reports/aggregate
 export * from "./eway/service"; // e-way bill: rules, draft capture, portal payload
 export * from "./salesdoc/service"; // estimates / proforma / delivery challans (21)
+export * from "./expenses/service"; // shop money-out register (21b)
 export * from "./shared/uqc"; // GST unit-quantity-code mapping
 export * from "./settings/service"; // re-exports ./settings/schema
 export * from "./dashboard/service";

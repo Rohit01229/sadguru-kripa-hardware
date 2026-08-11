@@ -45,6 +45,7 @@ export type IconKey =
   | "billing"
   | "salesdoc"
   | "ledger"
+  | "expenses"
   | "orders"
   | "reports"
   | "settings"
@@ -95,6 +96,13 @@ const navIcons: Record<IconKey, (props: IconProps) => React.ReactElement> = {
     <Icon {...p}>
       <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
       <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </Icon>
+  ),
+  expenses: (p) => (
+    <Icon {...p}>
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <path d="M2 10h20" />
+      <path d="M7 15h4" />
     </Icon>
   ),
   orders: (p) => (

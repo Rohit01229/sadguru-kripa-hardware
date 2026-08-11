@@ -25,6 +25,11 @@ export const PERMISSIONS = [
   "customers.write",
   "ledger.read",
   "ledger.write",
+  // Shop money-OUT (21b). Deliberately its own pair rather than reusing ledger.*:
+  // customer khata and the owner's rent/salary bills are different sensitivities, and a
+  // counter role that needs to see a customer's dues should not thereby see payroll.
+  "expenses.read",
+  "expenses.write",
   "orders.read",
   "orders.fulfil",
   "orders.place",

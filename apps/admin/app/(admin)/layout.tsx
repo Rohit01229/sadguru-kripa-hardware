@@ -32,6 +32,9 @@ const NAV: NavDef[] = [
   // the till is how myBillBook users lose it.
   { href: "/sales", label: "Estimates", iconKey: "salesdoc", visible: (s) => can(s, "bill.read") },
   { href: "/ledger", label: "Ledger", iconKey: "ledger", visible: (s) => can(s, "ledger.read") },
+  // Money OUT (21b). Sits beside the ledger (money in) rather than under Reports: a
+  // shopkeeper records an expense as it happens, they do not go looking for a report.
+  { href: "/expenses", label: "Expenses", iconKey: "expenses", visible: (s) => can(s, "expenses.read") },
   { href: "/orders", label: "Orders", iconKey: "orders", visible: (s) => can(s, "orders.read") },
   { href: "/reports", label: "Reports", iconKey: "reports", visible: (s) => can(s, "reports.read") },
   { href: "/settings", label: "Settings", iconKey: "settings", visible: (s) => can(s, "settings.read") },

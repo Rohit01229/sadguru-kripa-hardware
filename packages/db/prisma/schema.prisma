@@ -1052,6 +1052,75 @@ model SalesDoc {
   @@index([customerId])
 }
 
+// ──────────────────── Expenses (docs/architecture/21b) ────────────────────
+// myBillBook's Expenses screen: the shop's money going OUT that is not stock —
+// rent, electricity, wages, freight, tea. Recorded, categorised and totalled.
+//
+// It posts no double-entry and touches no ledger: we have no P&L for it to feed yet,
+// and inventing half an accounting system would be worse than an honest register.
+// What it gives a shopkeeper today is "where did my month go", which is the question
+// they actually ask.
+model ExpenseCategory {
+  id     String @id @default(cuid())
+  shopId String
+  name   String
+  /// True for the starter set seeded on first use, so re-seeding can skip a shop that
+  /// has curated its own categories.
+  isSeeded Boolean @default(false)
+
+  expenses Expense[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+}
+
+model ExpenseCounter {
+  shopId String
+  fy     String
+  lastNo Int    @default(0)
+
+  @@id([shopId, fy])
+}
+
+model Expense {
+  id        String   @id @default(cuid())
+  shopId    String
+  fy        String
+  expenseNo String // "EXP/2026-27/000012"
+  date      DateTime @default(now())
+
+  categoryId String
+  category   ExpenseCategory @relation(fields: [categoryId], references: [id])
+  /// Who was paid — free text. A landlord or the tea shop is not a Supplier row.
+  paidTo     String?
+
+  /// CASH | UPI | BANK | CARD | CHEQUE. A plain string, like SubscriptionPayment.method:
+  /// adding a mode should not be a migration.
+  paymentMode String
+  reference   String?
+
+  /// The shopkeeper enters ONE number — what actually left the till (`totalAmount`).
+  /// When the bill carries GST the taxable value is back-calculated from it, so the
+  /// figure typed is always the figure they know.
+  totalAmount   Decimal @db.Decimal(14, 2)
+  taxableAmount Decimal @db.Decimal(14, 2)
+  gstRate       Decimal @default(0) @db.Decimal(5, 2)
+  cgst          Decimal @default(0) @db.Decimal(14, 2)
+  sgst          Decimal @default(0) @db.Decimal(14, 2)
+  igst          Decimal @default(0) @db.Decimal(14, 2)
+  /// Present when the expense carries a claimable tax invoice.
+  supplierGstin String?
+
+  notes       String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([shopId, fy, expenseNo])
+  @@index([shopId, date])
+  @@index([categoryId])
+}
+
 model SalesDocLine {
   id         String   @id @default(cuid())
   shopId     String
