@@ -337,7 +337,10 @@ export async function createSalesDoc(
   const store = await storeContext(shopId);
   const supplyState = data.placeOfSupplyState?.trim() || store.homeState;
   const doRound = data.roundOff && store.gstRoundingMode !== "NONE";
-  const fy = financialYear(new Date());
+  // The series follows the DOCUMENT date, not the clock: a quote back-dated into last
+  // financial year belongs in that year's sequence, exactly as an invoice would.
+  const docDate = data.date ? new Date(data.date) : new Date();
+  const fy = financialYear(docDate);
 
   const doc = await runTx(async (tx) => {
     const { docNo } = await nextSalesDocNo(tx, shopId, data.kind, fy);
@@ -361,6 +364,7 @@ export async function createSalesDoc(
         customerPhoneSnap: data.customer?.phone ?? null,
         customerGstinSnap: data.customer?.gstin ?? null,
         placeOfSupplyState: supplyState,
+        date: docDate,
         // "Valid till" is a quotation concept; storing it on a challan would print a
         // meaningless date, so it is dropped for the other kinds rather than ignored
         // only at render time.
@@ -448,6 +452,9 @@ export async function updateSalesDoc(
         customerPhoneSnap: data.customer?.phone ?? null,
         customerGstinSnap: data.customer?.gstin ?? null,
         placeOfSupplyState: supplyState,
+        // The date may be corrected, but the number is NOT re-minted: the customer is
+        // already holding a copy that carries it.
+        ...(data.date ? { date: new Date(data.date) } : {}),
         validUntil:
           existing.kind === "QUOTATION" && data.validUntil ? new Date(data.validUntil) : null,
         notes: data.notes ?? null,

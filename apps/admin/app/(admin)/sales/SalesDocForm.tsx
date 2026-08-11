@@ -52,6 +52,12 @@ interface FormLine {
 
 let keySeq = 1;
 
+/** Today as yyyy-mm-dd in LOCAL time — `toISOString()` would shift a late-evening IST entry to yesterday. */
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /** Copy shown per document kind — the labels a myBillBook user already knows. */
 const COPY: Record<
   SalesDocKind,
@@ -141,6 +147,7 @@ export function SalesDocForm({
     existing && !existing.customerId ? (existing.customerName ?? "") : "",
   );
   const [placeOfSupply, setPlaceOfSupply] = useState(existing?.placeOfSupplyState ?? homeState);
+  const [docDate, setDocDate] = useState(existing?.date.slice(0, 10) ?? todayIso());
   const [validUntil, setValidUntil] = useState(existing?.validUntil?.slice(0, 10) ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [billDiscount, setBillDiscount] = useState(
@@ -338,6 +345,7 @@ export function SalesDocForm({
     setError(null);
 
     const payload = {
+      date: docDate ? new Date(docDate).toISOString() : null,
       placeOfSupplyState: placeOfSupply,
       customer: {
         customerId: customer?.id ?? null,
@@ -398,6 +406,11 @@ export function SalesDocForm({
               )}
             </div>
 
+            {/* Back-dating is normal: the quote was given on Tuesday and written up on
+                Thursday. These are not tax invoices, so no statutory date rule applies. */}
+            <FormField label="Date" required>
+              <Input type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} />
+            </FormField>
             {kind === "QUOTATION" && (
               <FormField label="Valid till" hint="Leave blank for no expiry.">
                 <Input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />

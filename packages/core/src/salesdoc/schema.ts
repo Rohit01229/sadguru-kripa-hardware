@@ -55,6 +55,12 @@ export const salesDocLineSchema = z.object({
 export type SalesDocLineInput = z.infer<typeof salesDocLineSchema>;
 
 const salesDocBody = {
+  /**
+   * Document date. Omitted ⇒ today. Back-dating is allowed and expected: a shopkeeper
+   * writes up on Thursday the quote they gave on Tuesday. These are not tax invoices,
+   * so no statutory date rule applies.
+   */
+  date: isoDate.optional().nullable(),
   placeOfSupplyState: stateCode.optional().nullable(),
   customer: salesDocPartySchema.optional().nullable(),
   lines: z.array(salesDocLineSchema).min(1, "Add at least one item."),
