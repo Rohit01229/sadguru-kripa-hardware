@@ -404,6 +404,7 @@ model Product {
   stock           ProductStock?
   movements       StockMovement[]
   salesDocLines   SalesDocLine[]
+  poLines         PurchaseOrderLine[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -559,16 +560,105 @@ model Reservation {
 
 // ──────────────────── Suppliers & purchasing (13 §6) ────────────────────
 model Supplier {
-  id        String            @id @default(cuid())
-  shopId    String
-  name      String
-  gstin     String?
-  phone     String?
-  address   String?
-  receipts  GoodsReceipt[]
-  payments  SupplierPayment[]
-  createdAt DateTime          @default(now())
+  id             String            @id @default(cuid())
+  shopId         String
+  name           String
+  gstin          String?
+  phone          String?
+  address        String?
+  receipts       GoodsReceipt[]
+  payments       SupplierPayment[]
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime          @default(now())
 
+  @@index([shopId])
+}
+
+// ──────────────────── Purchase orders (docs/architecture/21c) ────────────────────
+// myBillBook's Purchase Order: what you asked a supplier to send, before it arrives.
+// The buying-side mirror of SalesDoc — same shape, same convert-by-prefill flow, so a
+// shopkeeper learns the pattern once.
+//
+// A PO moves NO stock and creates no payable. It becomes real when the goods turn up
+// and a GoodsReceipt is recorded, through the ordinary (already-tested) recordGrn path.
+//
+// Deliberately NO GST columns, unlike SalesDoc. A GoodsReceipt records `costPerBaseUnit`
+// and nothing else, so tax entered on a PO would silently vanish on receipt — the
+// "switch that does nothing" problem (19 §10). Quantity × rate is what a small shop's
+// purchase order actually says.
+enum PurchaseOrderStatus {
+  OPEN
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrderCounter {
+  shopId String
+  fy     String
+  lastNo Int    @default(0)
+
+  @@id([shopId, fy])
+}
+
+model PurchaseOrder {
+  id     String @id @default(cuid())
+  shopId String
+  fy     String
+  poNo   String // "PO/2026-27/000012"
+
+  /// Required: a purchase order is addressed to someone. Snapshotted for print so a
+  /// later rename of the supplier does not rewrite an order already sent.
+  supplierId       String
+  supplier         Supplier @relation(fields: [supplierId], references: [id])
+  supplierNameSnap String
+
+  date         DateTime  @default(now())
+  /// "Expected by" — what the shop was promised. Informational, never enforced.
+  expectedDate DateTime?
+  notes        String?
+
+  /// Sum of the lines, in rupees. No tax component — see the note above.
+  subtotal Decimal @db.Decimal(14, 2)
+
+  status          PurchaseOrderStatus @default(OPEN)
+  cancelledReason String?
+
+  /// Set once goods are received against this order. Unique: one order cannot be
+  /// received twice, and the receipt is traceable back to what was ordered.
+  receivedGrnId String?   @unique
+  receivedAt    DateTime?
+
+  createdById String?
+  lines       PurchaseOrderLine[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@unique([shopId, fy, poNo])
+  @@index([shopId, status])
+  @@index([shopId, date])
+  @@index([supplierId])
+}
+
+model PurchaseOrderLine {
+  id              String        @id @default(cuid())
+  shopId          String
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+
+  /// The unit ordered in — the SAME field GrnLine's receive unit uses, so converting
+  /// an order into a receipt is a straight copy with no re-derivation.
+  receiveUnitId String
+  /// Quantity in the receive unit (not base units).
+  quantity      Decimal @db.Decimal(14, 3)
+  /// Expected landed cost per receive unit, in rupees.
+  costPerUnit   Decimal @db.Decimal(14, 2)
+  /// quantity × costPerUnit, stored so the list does not re-multiply on every read.
+  amount        Decimal @db.Decimal(14, 2)
+  sortOrder     Int     @default(0)
+
+  @@index([purchaseOrderId])
   @@index([shopId])
 }
 

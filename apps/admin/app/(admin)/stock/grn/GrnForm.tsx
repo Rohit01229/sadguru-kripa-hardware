@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
+  Alert,
   Card,
   CardContent,
   FormField,
@@ -15,6 +16,7 @@ import {
   toast,
 } from "@hardware/ui";
 import { recordGrnAction, type ActionState } from "../actions";
+import { markReceivedAction } from "../../purchases/actions";
 
 interface ProductOpt {
   id: string;
@@ -27,8 +29,22 @@ interface ProductOpt {
 interface LineState {
   key: number;
   productId: string;
+  /** Controlled so a purchase order can seed the exact unit it was ordered in (21c). */
+  receiveUnitId: string;
   quantity: string;
   cost: string;
+}
+
+/**
+ * A purchase order handed to the receiving desk (21c). Its lines are loaded so the
+ * operator can correct what actually turned up — short deliveries and revised rates
+ * are the norm — and `purchaseOrderId` is stamped as received once the GRN commits.
+ */
+export interface GrnPrefill {
+  purchaseOrderId: string;
+  poNo: string;
+  supplierId: string;
+  lines: { productId: string; receiveUnitId: string; quantity: string; costPerUnit: number }[];
 }
 
 // GRN entry form. Dynamic line rows (product · receive unit · qty · batch/expiry ·
@@ -38,20 +54,64 @@ interface LineState {
 // The "Est. total" column + footer are a DISPLAY-ONLY preview (qty × cost). The
 // server stays authoritative for every paise of stock value — these numbers are
 // never sent back as totals.
-export function GrnForm({ products, suppliers }: { products: ProductOpt[]; suppliers: { id: string; name: string }[] }) {
+/** First sale unit of a product — the default receive unit for a fresh line. */
+function defaultUnit(products: ProductOpt[], productId: string): string {
+  return products.find((p) => p.id === productId)?.saleUnits[0]?.id ?? "";
+}
+
+export function GrnForm({
+  products,
+  suppliers,
+  prefill,
+}: {
+  products: ProductOpt[];
+  suppliers: { id: string; name: string }[];
+  /** Set when receiving against a purchase order (/stock/grn?fromPo=…). */
+  prefill?: GrnPrefill;
+}) {
   const router = useRouter();
   const t = useTranslations("stock");
   const [idempotencyKey] = useState(() => globalThis.crypto?.randomUUID?.() ?? String(Date.now()));
-  const [lines, setLines] = useState<LineState[]>([
-    { key: 1, productId: products[0]?.id ?? "", quantity: "", cost: "" },
-  ]);
-  const [nextKey, setNextKey] = useState(2);
+  const [lines, setLines] = useState<LineState[]>(() =>
+    prefill && prefill.lines.length > 0
+      ? prefill.lines.map((l, i) => ({
+          key: i + 1,
+          productId: l.productId,
+          receiveUnitId: l.receiveUnitId,
+          quantity: l.quantity,
+          cost: l.costPerUnit > 0 ? (l.costPerUnit / 100).toFixed(2) : "",
+        }))
+      : [
+          {
+            key: 1,
+            productId: products[0]?.id ?? "",
+            receiveUnitId: defaultUnit(products, products[0]?.id ?? ""),
+            quantity: "",
+            cost: "",
+          },
+        ],
+  );
+  const [nextKey, setNextKey] = useState(() => (prefill ? prefill.lines.length + 1 : 2));
+  /** Cleared once stamped, so a re-submit cannot mark the same order received twice. */
+  const [pendingPoId, setPendingPoId] = useState<string | null>(prefill?.purchaseOrderId ?? null);
 
   const [state, formAction, pending] = useActionState<ActionState, FormData>(async (prev, fd) => {
     const result = await recordGrnAction(prev, fd);
     if (result.ok) {
       toast.success(t("grn.toastSuccess"));
-      router.push("/stock");
+      // Stamp the source order AFTER the receipt exists. Stock is booked in either way,
+      // so a failure here is a warning to retry from the order — never lost stock.
+      if (pendingPoId && result.id) {
+        const poId = pendingPoId;
+        setPendingPoId(null);
+        const stamp = await markReceivedAction(poId, result.id);
+        if (stamp.error) {
+          toast.info("Stock received, but the order could not be marked as received.", {
+            description: stamp.error,
+          });
+        }
+      }
+      router.push(pendingPoId ? "/purchases" : "/stock");
     } else if (result.error) {
       toast.error(result.error);
     }
@@ -59,7 +119,17 @@ export function GrnForm({ products, suppliers }: { products: ProductOpt[]; suppl
   }, {});
 
   const addLine = () => {
-    setLines((ls) => [...ls, { key: nextKey, productId: products[0]?.id ?? "", quantity: "", cost: "" }]);
+    const firstId = products[0]?.id ?? "";
+    setLines((ls) => [
+      ...ls,
+      {
+        key: nextKey,
+        productId: firstId,
+        receiveUnitId: defaultUnit(products, firstId),
+        quantity: "",
+        cost: "",
+      },
+    ]);
     setNextKey((k) => k + 1);
   };
   const removeLine = (key: number) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : ls));
@@ -88,10 +158,17 @@ export function GrnForm({ products, suppliers }: { products: ProductOpt[]; suppl
     <form action={formAction} className="space-y-6">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
 
+      {prefill && pendingPoId && (
+        <Alert>
+          Receiving purchase order <strong>{prefill.poNo}</strong>. Correct the quantities and rates
+          if what arrived is different — the order is marked received once you save.
+        </Alert>
+      )}
+
       <Card>
         <CardContent className="grid gap-4 pt-4 sm:grid-cols-3">
           <FormField label={t("grn.supplier")} hint={t("grn.supplierHint")}>
-            <Select name="supplierId" defaultValue="">
+            <Select name="supplierId" defaultValue={prefill?.supplierId ?? ""}>
               <option value="">{t("grn.supplierNone")}</option>
               {suppliers.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -142,7 +219,14 @@ export function GrnForm({ products, suppliers }: { products: ProductOpt[]; suppl
                   <Select
                     name="productId"
                     value={line.productId}
-                    onChange={(e) => patchLine(line.key, { productId: e.target.value })}
+                    onChange={(e) =>
+                      // Changing the product invalidates the chosen unit — it belongs to
+                      // the old item — so reset it rather than submit a mismatched pair.
+                      patchLine(line.key, {
+                        productId: e.target.value,
+                        receiveUnitId: defaultUnit(products, e.target.value),
+                      })
+                    }
                   >
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -153,7 +237,11 @@ export function GrnForm({ products, suppliers }: { products: ProductOpt[]; suppl
                 </FormField>
 
                 <FormField label={t("grn.receiveUnit")}>
-                  <Select name="receiveUnitId" defaultValue={product.saleUnits[0]?.id}>
+                  <Select
+                    name="receiveUnitId"
+                    value={line.receiveUnitId}
+                    onChange={(e) => patchLine(line.key, { receiveUnitId: e.target.value })}
+                  >
                     {product.saleUnits.map((su) => (
                       <option key={su.id} value={su.id}>
                         {su.label}

@@ -1,15 +1,26 @@
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { listProducts, listSuppliers, requirePermission, Forbidden } from "@hardware/core";
+import {
+  listProducts,
+  listSuppliers,
+  getPurchaseOrder,
+  requirePermission,
+  Forbidden,
+} from "@hardware/core";
 import { PageHeader } from "@hardware/ui";
 import { getStaffSession, requireShopId } from "../../../../lib/session";
 import { StockNav, Forbid } from "../nav";
-import { GrnForm } from "./GrnForm";
+import { GrnForm, type GrnPrefill } from "./GrnForm";
 
 // GRN entry (S3): supplier + lines (product · receive unit · qty · batch/expiry ·
 // cost). Converts receive-unit qty → base and increments stock atomically; the
 // core service enforces stock.grn + audits + is idempotent on the Idempotency-Key.
-export default async function GrnPage() {
+export default async function GrnPage({
+  searchParams,
+}: {
+  /** `?fromPo=<id>` — receiving against a purchase order (21c). */
+  searchParams: Promise<{ fromPo?: string }>;
+}) {
   const session = await getStaffSession();
   if (!session) redirect("/login");
   try {
@@ -32,6 +43,27 @@ export default async function GrnPage() {
     saleUnits: p.saleUnits.map((su) => ({ id: su.id, label: `${su.unitName} (×${su.factorToBase} ${p.baseUnit.code})` })),
   }));
 
+  // Receiving against a purchase order (21c). Only an OPEN order prefills: a cancelled
+  // or already-received one must not quietly book a second lot of stock.
+  const { fromPo } = await searchParams;
+  let prefill: GrnPrefill | undefined;
+  if (fromPo) {
+    const po = await getPurchaseOrder(shopId, fromPo);
+    if (po && po.status === "OPEN") {
+      prefill = {
+        purchaseOrderId: po.id,
+        poNo: po.poNo,
+        supplierId: po.supplierId,
+        lines: po.lines.map((l) => ({
+          productId: l.productId,
+          receiveUnitId: l.receiveUnitId,
+          quantity: l.quantity,
+          costPerUnit: l.costPerUnit,
+        })),
+      };
+    }
+  }
+
   return (
     <div className="space-y-6">
       <StockNav active="grn" />
@@ -44,6 +76,7 @@ export default async function GrnPage() {
       <GrnForm
         products={products}
         suppliers={suppliers.map((s) => ({ id: s.id, name: s.name }))}
+        prefill={prefill}
       />
     </div>
   );

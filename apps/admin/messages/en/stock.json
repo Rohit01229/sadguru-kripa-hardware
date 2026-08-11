@@ -2,6 +2,7 @@
   "nav": {
     "sections": "Stock sections",
     "list": "Stock",
+    "purchases": "Purchase orders",
     "grn": "GRN",
     "adjust": "Adjustments & Returns",
     "movements": "Movement ledger",

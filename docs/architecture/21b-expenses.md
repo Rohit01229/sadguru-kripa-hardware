@@ -72,3 +72,5 @@ Two rules:
 - **No bill photo attachment.** myBillBook lets you snap the receipt. We have Cloudinary wired for product images already, so this is small — just not built.
 - **No recurring expenses.** Rent is the same number every month and re-typing it is friction.
 - **No P&L.** Expenses + sales is nearly enough for a simple one; the missing piece is cost-at-sale on invoice lines (19 §11).
+
+The back-dateable document date added here also applies to purchase orders ([21c](21c-purchase-orders.md)).

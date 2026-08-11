@@ -11,6 +11,10 @@ import { Tabs, TabsList, TabsLink, ForbiddenState } from "@hardware/ui";
 
 const ITEMS: { href: string; key: string }[] = [
   { href: "/stock", key: "list" },
+  // Purchase orders live here rather than in a twelfth sidebar entry: goods receipts
+  // and suppliers are already in this section, and splitting purchasing across two
+  // places is worse than putting it one click deeper (21c).
+  { href: "/purchases", key: "purchases" },
   { href: "/stock/grn", key: "grn" },
   { href: "/stock/adjustments", key: "adjust" },
   { href: "/stock/movements", key: "movements" },
