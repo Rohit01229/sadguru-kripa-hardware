@@ -45,7 +45,7 @@ jobs:
       # Turbo's cache makes reruns cheap; keyed on the lockfile so a dependency change
       # invalidates it.
       - name: Restore turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .turbo
           key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
